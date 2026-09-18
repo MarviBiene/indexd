@@ -542,6 +542,9 @@ components:
         unrecoverableReason:
           type: string
           description: Set when the slab can never be fully repaired, taking it out of the repair rotation
+        failureReason:
+          type: string
+          description: Set when a repair attempt failed before all required sectors could be recovered and migrated
 
     ObjectSlab:
       type: object
