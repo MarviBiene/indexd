@@ -25,31 +25,31 @@ func (m *SlabManager) ObjectStats() (ObjectStats, error) {
 // SectorsStats reports statistics about the sectors and slabs stored in the
 // database.
 type SectorsStats struct {
-	Slabs	int64	`json:"slabs"`
-	Migrated	int64	`json:"migrated"`
-	Pinned	int64	`json:"pinned"`
-	Unpinnable	int64	`json:"unpinnable"`
-	Unpinned	int64	`json:"unpinned"`
-	Lost	int64	`json:"lost"`
-	Checked	int64	`json:"checked"`
-	CheckFailed	int64	`json:"checkFailed"`
-	UnrecoverableSlabs	int64	`json:"unrecoverableSlabs"`
-	StuckSlabs	int64	`json:"stuckSlabs"`
-	RepairThreshold	int	`json:"repairThreshold"`
-	DegradedSlabs	int64	`json:"degradedSlabs"`
-	WaitingForThresholdSlabs	int64	`json:"waitingForThresholdSlabs"`
-	ToMigrateSlabs	int64	`json:"toMigrateSlabs"`
-	ReadyToMigrateSlabs	int64	`json:"readyToMigrateSlabs"`
-	DeferredMigrationSlabs	int64	`json:"deferredMigrationSlabs"`
-	DegradedSectors	int64	`json:"degradedSectors"`
-	RetryingSlabs	int64	`json:"retryingSlabs"`
-	WorstSlabHealth	float64	`json:"worstSlabHealth"`
-	WorstSlabGoodSectors	int64	`json:"worstSlabGoodSectors"`
-	WorstSlabTotalSectors	int64	`json:"worstSlabTotalSectors"`
-	WorstSlabMinShards	int64	`json:"worstSlabMinShards"`
-	WorstSlabDegradedSectors	int64	`json:"worstSlabDegradedSectors"`
-	WorstSlabRecoveryMargin	int64	`json:"worstSlabRecoveryMargin"`
-	WorstSlabID	string	`json:"worstSlabID,omitempty"`
+	Slabs                    int64   `json:"slabs"`
+	Migrated                 int64   `json:"migrated"`
+	Pinned                   int64   `json:"pinned"`
+	Unpinnable               int64   `json:"unpinnable"`
+	Unpinned                 int64   `json:"unpinned"`
+	Lost                     int64   `json:"lost"`
+	Checked                  int64   `json:"checked"`
+	CheckFailed              int64   `json:"checkFailed"`
+	UnrecoverableSlabs       int64   `json:"unrecoverableSlabs"`
+	StuckSlabs               int64   `json:"stuckSlabs"`
+	RepairThreshold          int     `json:"repairThreshold"`
+	DegradedSlabs            int64   `json:"degradedSlabs"`
+	WaitingForThresholdSlabs int64   `json:"waitingForThresholdSlabs"`
+	ToMigrateSlabs           int64   `json:"toMigrateSlabs"`
+	ReadyToMigrateSlabs      int64   `json:"readyToMigrateSlabs"`
+	DeferredMigrationSlabs   int64   `json:"deferredMigrationSlabs"`
+	DegradedSectors          int64   `json:"degradedSectors"`
+	RetryingSlabs            int64   `json:"retryingSlabs"`
+	WorstSlabHealth          float64 `json:"worstSlabHealth"`
+	WorstSlabGoodSectors     int64   `json:"worstSlabGoodSectors"`
+	WorstSlabTotalSectors    int64   `json:"worstSlabTotalSectors"`
+	WorstSlabMinShards       int64   `json:"worstSlabMinShards"`
+	WorstSlabDegradedSectors int64   `json:"worstSlabDegradedSectors"`
+	WorstSlabRecoveryMargin  int64   `json:"worstSlabRecoveryMargin"`
+	WorstSlabID              string  `json:"worstSlabID,omitempty"`
 }
 
 // SectorStats reports statistics about the sectors and slabs stored in the
