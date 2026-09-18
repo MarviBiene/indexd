@@ -155,6 +155,7 @@ explorer:
 slabs:
     migrationWorkers: 16 # number of slabs to migrate in parallel (0 defaults to runtime.NumCPU())
     migrations: true # run slab migrations (set to false to outsource migrations to a remote node)
+    repairThreshold: 1 # minimum degraded sectors in a slab before migration starts (0 defaults to 1)
 log:
     stdout:
         enabled: true # enable logging to stdout

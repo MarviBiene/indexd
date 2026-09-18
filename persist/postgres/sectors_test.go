@@ -2103,6 +2103,45 @@ func TestPinSlabsRepairLease(t *testing.T) {
 	}
 }
 
+func TestUnhealthySlabsRepairThreshold(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	slabID := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk, hk, hk, hk, hk})
+
+	// Four degraded sectors stay below the configured threshold.
+	if _, err := store.pool.Exec(t.Context(), `
+		UPDATE sectors SET host_id = NULL
+		WHERE id IN (SELECT id FROM sectors ORDER BY id LIMIT 4)
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if batch, _, err := store.UnhealthySlabs(0, 10, 5); err != nil {
+		t.Fatal(err)
+	} else if len(batch) != 0 {
+		t.Fatalf("expected no slabs below threshold, got %d", len(batch))
+	}
+
+	// The fifth degraded sector makes the slab eligible for repair.
+	if _, err := store.pool.Exec(t.Context(), `
+		UPDATE sectors SET host_id = NULL
+		WHERE id = (SELECT id FROM sectors WHERE host_id IS NOT NULL ORDER BY id LIMIT 1)
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if batch, _, err := store.UnhealthySlabs(0, 10, 5); err != nil {
+		t.Fatal(err)
+	} else if len(batch) != 1 {
+		t.Fatalf("expected one slab at threshold, got %d", len(batch))
+	} else if batch[0] != slabID {
+		t.Fatalf("expected slab %v, got %v", slabID, batch[0])
+	}
+}
+
 func TestUnhealthySlabs(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 

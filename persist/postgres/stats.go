@@ -184,12 +184,74 @@ func (s *Store) ObjectStats() (slabs.ObjectStats, error) {
 
 // SectorStats reports statistics about the sectors and slabs stored in the
 // database.
-func (s *Store) SectorStats() (slabs.SectorsStats, error) {
+func (s *Store) SectorStats(repairThreshold ...int) (slabs.SectorsStats, error) {
 	var stats slabs.SectorsStats
+	threshold := 1
+	if len(repairThreshold) > 1 {
+		return stats, fmt.Errorf("repair threshold accepts at most one value")
+	} else if len(repairThreshold) == 1 {
+		if repairThreshold[0] <= 0 {
+			return stats, fmt.Errorf("repair threshold must be positive")
+		}
+		threshold = repairThreshold[0]
+	}
+	stats.RepairThreshold = threshold
+
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, sqlStatSelect(statSlabs, statMigratedSectors, statPinnedSectors, statUnpinnableSectors, statUnpinnedSectors, statSectorsLost, statSectorsChecked, statSectorsCheckFailed, statUnrecoverableSlabs, statStuckSlabs)).
+		if err := tx.QueryRow(ctx, sqlStatSelect(statSlabs, statMigratedSectors, statPinnedSectors, statUnpinnableSectors, statUnpinnedSectors, statSectorsLost, statSectorsChecked, statSectorsCheckFailed, statUnrecoverableSlabs, statStuckSlabs)).
 			Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned, &stats.Lost, &stats.Checked, &stats.CheckFailed,
-				&stats.UnrecoverableSlabs, &stats.StuckSlabs)
+				&stats.UnrecoverableSlabs, &stats.StuckSlabs); err != nil {
+			return err
+		}
+
+		return tx.QueryRow(ctx, `
+WITH bad_sectors AS (
+	SELECT id
+	FROM sectors
+	WHERE host_id IS NULL
+	UNION
+	SELECT s.id
+	FROM sectors s
+	INNER JOIN contract_sectors_map csm ON csm.id = s.contract_sectors_map_id
+	INNER JOIN contracts c ON c.contract_id = csm.contract_id
+	WHERE c.good = FALSE OR c.state NOT IN (0, 1)
+), degraded_refs AS (
+	SELECT ss.slab_id, ss.sector_id
+	FROM slab_sectors ss
+	INNER JOIN bad_sectors bs ON bs.id = ss.sector_id
+), degraded AS (
+	SELECT slab_id, COUNT(*) AS degraded_sectors
+	FROM degraded_refs
+	GROUP BY slab_id
+), recoverable AS (
+	SELECT d.slab_id, d.degraded_sectors, s.consecutive_failed_repairs, s.next_repair_attempt
+	FROM degraded d
+	INNER JOIN slabs s ON s.id = d.slab_id
+	WHERE NOT s.unrecoverable
+)
+SELECT
+	COUNT(*),
+	COUNT(*) FILTER (WHERE degraded_sectors < $1),
+	COUNT(*) FILTER (WHERE degraded_sectors >= $1),
+	COUNT(*) FILTER (WHERE degraded_sectors >= $1 AND next_repair_attempt <= NOW()),
+	COUNT(*) FILTER (WHERE degraded_sectors >= $1 AND next_repair_attempt > NOW()),
+	COALESCE((
+		SELECT COUNT(DISTINCT dr.sector_id)
+		FROM degraded_refs dr
+		INNER JOIN slabs s ON s.id = dr.slab_id
+		WHERE NOT s.unrecoverable
+	), 0),
+	COUNT(*) FILTER (WHERE degraded_sectors >= $1 AND consecutive_failed_repairs > 0)
+FROM recoverable
+`, threshold).Scan(
+			&stats.DegradedSlabs,
+			&stats.WaitingForThresholdSlabs,
+			&stats.ToMigrateSlabs,
+			&stats.ReadyToMigrateSlabs,
+			&stats.DeferredMigrationSlabs,
+			&stats.DegradedSectors,
+			&stats.RetryingSlabs,
+		)
 	})
 	return stats, err
 }

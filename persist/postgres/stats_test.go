@@ -155,6 +155,98 @@ func TestSlabRepairStats(t *testing.T) {
 	assertStats(1, 0)
 }
 
+func TestSectorMigrationQueueStats(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	slabID := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk, hk, hk, hk, hk})
+
+	markLost := func(n int) {
+		t.Helper()
+		_, err := store.pool.Exec(t.Context(), `
+UPDATE sectors
+SET host_id = NULL
+WHERE id IN (
+	SELECT ss.sector_id
+	FROM slab_sectors ss
+	INNER JOIN slabs sl ON sl.id = ss.slab_id
+	INNER JOIN sectors sec ON sec.id = ss.sector_id
+	WHERE sl.digest = $1 AND sec.host_id IS NOT NULL
+	ORDER BY ss.sector_id
+	LIMIT $2
+)
+`, sqlHash256(slabID), n)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	assertQueue := func(degraded, waiting, toMigrate, ready, deferred, sectors, retrying int64) {
+		t.Helper()
+		stats, err := store.SectorStats(5)
+		if err != nil {
+			t.Fatal(err)
+		} else if stats.RepairThreshold != 5 {
+			t.Fatalf("expected repair threshold 5, got %d", stats.RepairThreshold)
+		} else if stats.DegradedSlabs != degraded {
+			t.Fatalf("expected %d degraded slabs, got %d", degraded, stats.DegradedSlabs)
+		} else if stats.WaitingForThresholdSlabs != waiting {
+			t.Fatalf("expected %d slabs waiting for threshold, got %d", waiting, stats.WaitingForThresholdSlabs)
+		} else if stats.ToMigrateSlabs != toMigrate {
+			t.Fatalf("expected %d slabs to migrate, got %d", toMigrate, stats.ToMigrateSlabs)
+		} else if stats.ReadyToMigrateSlabs != ready {
+			t.Fatalf("expected %d ready-to-migrate slabs, got %d", ready, stats.ReadyToMigrateSlabs)
+		} else if stats.DeferredMigrationSlabs != deferred {
+			t.Fatalf("expected %d deferred migration slabs, got %d", deferred, stats.DeferredMigrationSlabs)
+		} else if stats.DegradedSectors != sectors {
+			t.Fatalf("expected %d degraded sectors, got %d", sectors, stats.DegradedSectors)
+		} else if stats.RetryingSlabs != retrying {
+			t.Fatalf("expected %d retrying slabs, got %d", retrying, stats.RetryingSlabs)
+		}
+	}
+
+	assertQueue(0, 0, 0, 0, 0, 0, 0)
+
+	// Four bad sectors are visible as degraded but remain below threshold 5.
+	markLost(4)
+	assertQueue(1, 1, 0, 0, 0, 4, 0)
+
+	// The fifth bad sector makes the slab migration-eligible.
+	markLost(1)
+	assertQueue(1, 0, 1, 1, 0, 5, 0)
+
+	// Failed attempts remain in the migration queue and surface as retries.
+	if err := store.MarkSlabRepaired(slabID, false); err != nil {
+		t.Fatal(err)
+	}
+	assertQueue(1, 0, 1, 0, 1, 5, 1)
+
+	if err := store.MarkSlabRepaired(slabID, false); err != nil {
+		t.Fatal(err)
+	}
+	assertQueue(1, 0, 1, 0, 1, 5, 1)
+	if stats, err := store.SectorStats(5); err != nil {
+		t.Fatal(err)
+	} else if stats.StuckSlabs != 1 {
+		t.Fatalf("expected one stuck slab, got %d", stats.StuckSlabs)
+	}
+
+	// Unrecoverable slabs leave the migration queue and are counted separately.
+	if err := store.MarkSlabUnrecoverable(slabID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	assertQueue(0, 0, 0, 0, 0, 0, 0)
+	if stats, err := store.SectorStats(5); err != nil {
+		t.Fatal(err)
+	} else if stats.UnrecoverableSlabs != 1 {
+		t.Fatalf("expected one unrecoverable slab, got %d", stats.UnrecoverableSlabs)
+	}
+}
+
 func TestFlushStatsDelta(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

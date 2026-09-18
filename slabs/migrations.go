@@ -319,7 +319,7 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 // the next call to continue paging; a cursor of 0 means there are no more
 // unhealthy slabs.
 func (m *SlabManager) PrepareMigrationBatch(cursor int64, limit int) (MigrationBatch, error) {
-	ids, nextCursor, err := m.store.UnhealthySlabs(cursor, limit)
+	ids, nextCursor, err := m.store.UnhealthySlabs(cursor, limit, m.repairThreshold)
 	if err != nil {
 		return MigrationBatch{}, fmt.Errorf("failed to fetch unhealthy slabs: %w", err)
 	} else if len(ids) == 0 {

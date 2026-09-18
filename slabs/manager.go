@@ -37,6 +37,7 @@ type (
 
 		numIntegrityCheckGoroutines int
 		numMigrationGoroutines      int
+		repairThreshold             int
 		integrityCheckTimeout       time.Duration
 
 		runMigrations bool
@@ -132,7 +133,7 @@ type (
 		Slabs(account proto.Account, slabIDs []SlabID) ([]Slab, error)
 		SlabIDs(account proto.Account, offset, limit int) ([]SlabID, error)
 		Tip() (types.ChainIndex, error)
-		UnhealthySlabs(cursor int64, limit int) ([]SlabID, int64, error)
+		UnhealthySlabs(cursor int64, limit int, repairThreshold ...int) ([]SlabID, int64, error)
 		PruneSlabs(account proto.Account, cutoff time.Time) error
 		PruneDeletedSlabs(limit int) (int, error)
 
@@ -152,7 +153,7 @@ type (
 		BlockedObjects(offset, limit int) ([]BlockedObject, error)
 
 		ObjectsForSlab(slabID SlabID) ([]SlabObject, error)
-		SectorStats() (SectorsStats, error)
+		SectorStats(repairThreshold ...int) (SectorsStats, error)
 	}
 
 	// AlertsManager defines an interface to register alerts.
@@ -219,6 +220,17 @@ func WithNumMigrationGoroutines(size int) Option {
 			panic("migration batch size must be positive") // developer error
 		}
 		m.numMigrationGoroutines = size
+	}
+}
+
+// WithRepairThreshold sets the minimum number of degraded sectors a slab must
+// have before it is selected for migration. The default is 1.
+func WithRepairThreshold(threshold int) Option {
+	return func(m *SlabManager) {
+		if threshold <= 0 {
+			panic("repair threshold must be positive") // developer error
+		}
+		m.repairThreshold = threshold
 	}
 }
 
@@ -301,6 +313,7 @@ func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store
 		integrityCheckTimeout:       5 * time.Minute,
 		numIntegrityCheckGoroutines: 50,
 		numMigrationGoroutines:      runtime.NumCPU(),
+		repairThreshold:             1,
 
 		runMigrations: true,
 
@@ -510,7 +523,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 		for {
 			log.Debug("processing batch")
 			fetchStart := time.Now()
-			batch, nextCursor, err := m.store.UnhealthySlabs(cursor, slabBatchSize)
+			batch, nextCursor, err := m.store.UnhealthySlabs(cursor, slabBatchSize, m.repairThreshold)
 			if err != nil {
 				producerErrCh <- err
 				return

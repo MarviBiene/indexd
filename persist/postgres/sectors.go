@@ -1076,7 +1076,17 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 //
 // NOTE: For the sake of scalability, we don't prioritize slabs based on their
 // health but walk the sectors table by id, which roughly follows upload order.
-func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabID, nextCursor int64, err error) {
+func (s *Store) UnhealthySlabs(cursor int64, limit int, repairThreshold ...int) (unhealthy []slabs.SlabID, nextCursor int64, err error) {
+	threshold := 1
+	if len(repairThreshold) > 1 {
+		return nil, 0, errors.New("repair threshold accepts at most one value")
+	} else if len(repairThreshold) == 1 {
+		if repairThreshold[0] <= 0 {
+			return nil, 0, errors.New("repair threshold must be positive")
+		}
+		threshold = repairThreshold[0]
+	}
+
 	start := time.Now()
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		unhealthy = unhealthy[:0] // reuse same slice if transaction retries
@@ -1103,11 +1113,24 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 				SELECT DISTINCT ss.slab_id AS id
 				FROM slab_sectors ss
 				WHERE ss.sector_id IN (SELECT id FROM batch)
+			), eligible AS (
+				SELECT ss.slab_id AS id
+				FROM slab_sectors ss
+				INNER JOIN sectors s ON s.id = ss.sector_id
+				LEFT JOIN contract_sectors_map csm ON csm.id = s.contract_sectors_map_id
+				LEFT JOIN contracts c ON c.contract_id = csm.contract_id
+				WHERE ss.slab_id IN (SELECT id FROM unhealthy)
+					AND (
+						s.host_id IS NULL
+						OR (s.contract_sectors_map_id IS NOT NULL AND (c.good = FALSE OR c.state NOT IN (0, 1)))
+					)
+				GROUP BY ss.slab_id
+				HAVING COUNT(*) >= $4
 			), claimed AS (
 				UPDATE slabs SET next_repair_attempt = $3
 				WHERE id IN (
 					SELECT id FROM slabs
-					WHERE id IN (SELECT id FROM unhealthy) AND next_repair_attempt < NOW() AND NOT unrecoverable
+					WHERE id IN (SELECT id FROM eligible) AND next_repair_attempt < NOW() AND NOT unrecoverable
 					FOR UPDATE SKIP LOCKED
 				)
 				RETURNING id, digest
@@ -1116,7 +1139,7 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 			FROM (SELECT max(id) AS next_cursor FROM batch) cur
 			LEFT JOIN claimed c ON true;`
 
-		rows, err := tx.Query(ctx, query, cursor, limit, time.Now().Add(minRepairBackoff))
+		rows, err := tx.Query(ctx, query, cursor, limit, time.Now().Add(minRepairBackoff), threshold)
 		if err != nil {
 			return fmt.Errorf("failed to query unhealthy slabs: %w", err)
 		}
@@ -1136,7 +1159,7 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 		return rows.Err()
 	})
 	if err == nil {
-		s.log.Debug("unhealthy slabs", zap.Int64("cursor", cursor), zap.Int64("nextCursor", nextCursor), zap.Int("slabs", len(unhealthy)), zap.Duration("elapsed", time.Since(start)))
+		s.log.Debug("unhealthy slabs", zap.Int64("cursor", cursor), zap.Int64("nextCursor", nextCursor), zap.Int("slabs", len(unhealthy)), zap.Int("repairThreshold", threshold), zap.Duration("elapsed", time.Since(start)))
 	}
 	return
 }

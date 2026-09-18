@@ -256,6 +256,9 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	if cfg.Slabs.MigrationWorkers > 0 {
 		slabOpts = append(slabOpts, slabs.WithNumMigrationGoroutines(cfg.Slabs.MigrationWorkers))
 	}
+	if cfg.Slabs.RepairThreshold > 0 {
+		slabOpts = append(slabOpts, slabs.WithRepairThreshold(cfg.Slabs.RepairThreshold))
+	}
 	slabOpts = append(slabOpts, slabs.WithMigrations(cfg.Slabs.Migrations))
 	migrationKey, integrityKey := slabs.DeriveAccountKeys(walletKey)
 	slabs, err := slabs.NewManager(am, contracts, hm, store, client, alerter, migrationKey, integrityKey, slabOpts...)
