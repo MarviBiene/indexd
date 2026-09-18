@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 )
@@ -347,6 +348,13 @@ func (s *Store) BlockedHosts(offset, limit int) ([]types.PublicKey, error) {
 // BlockHosts adds the given host keys to the blocklist and marks all of its
 // contracts as bad. If a host is already on the blocklist, the reasons are
 // updated to include any new reasons for blocking.
+func hostsBadReason(reasons []string) string {
+	if len(reasons) == 0 {
+		return contracts.BadReasonHostBlockedPrefix + "unspecified"
+	}
+	return contracts.BadReasonHostBlockedPrefix + strings.Join(reasons, ", ")
+}
+
 func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		for _, hk := range hks {
@@ -370,7 +378,18 @@ func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 				continue // nothing to update
 			}
 
-			_, err = tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE host_id = $1`, hostID)
+			badReason := hostsBadReason(updated)
+			_, err = tx.Exec(ctx, `
+WITH marked AS (
+	UPDATE contracts
+	SET good = FALSE
+	WHERE host_id = $1 AND good
+	RETURNING contract_id
+)
+INSERT INTO custom_contract_bad_metadata (contract_id, bad_reason, bad_since)
+SELECT contract_id, $2, NOW() FROM marked
+ON CONFLICT (contract_id) DO NOTHING
+`, hostID, badReason)
 			if err != nil {
 				return fmt.Errorf("failed to update contracts: %w", err)
 			}
@@ -445,11 +464,19 @@ func (s *Store) UnblockHost(hk types.PublicKey) error {
 			return fmt.Errorf("failed to remove host %q from blocklist: %w", hk, err)
 		}
 		_, err = tx.Exec(ctx, `
-			UPDATE contracts AS c
-			SET good = TRUE
-			FROM hosts h
-			WHERE c.host_id = h.id AND h.public_key = $1
-		`, sqlPublicKey(hk))
+WITH restored AS (
+	UPDATE contracts AS c
+	SET good = TRUE
+	FROM hosts h, custom_contract_bad_metadata cbm
+	WHERE c.host_id = h.id
+		AND h.public_key = $1
+		AND cbm.contract_id = c.contract_id
+		AND cbm.bad_reason LIKE $2
+	RETURNING c.contract_id
+)
+DELETE FROM custom_contract_bad_metadata
+WHERE contract_id IN (SELECT contract_id FROM restored)
+		`, sqlPublicKey(hk), contracts.BadReasonHostBlockedPrefix+"%")
 		if err != nil {
 			return fmt.Errorf("failed to update contracts: %w", err)
 		}
@@ -502,10 +529,19 @@ func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) 
 		// mark the fully-unblocked hosts' contracts good again.
 		if len(unblocked) > 0 {
 			if _, err := tx.Exec(ctx, `
-				UPDATE contracts c
-				SET good = TRUE
-				FROM hosts h
-				WHERE c.host_id = h.id AND h.public_key = ANY($1)`, unblocked); err != nil {
+WITH restored AS (
+	UPDATE contracts c
+	SET good = TRUE
+	FROM hosts h, custom_contract_bad_metadata cbm
+	WHERE c.host_id = h.id
+		AND h.public_key = ANY($1)
+		AND cbm.contract_id = c.contract_id
+		AND cbm.bad_reason LIKE $2
+	RETURNING c.contract_id
+)
+DELETE FROM custom_contract_bad_metadata
+WHERE contract_id IN (SELECT contract_id FROM restored)
+			`, unblocked, contracts.BadReasonHostBlockedPrefix+"%"); err != nil {
 				return fmt.Errorf("failed to mark contracts good: %w", err)
 			}
 		}

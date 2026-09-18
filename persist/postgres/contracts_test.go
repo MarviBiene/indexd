@@ -1644,7 +1644,7 @@ func TestMarkContractBad(t *testing.T) {
 		t.Fatal("expected contract to be good initially")
 	}
 
-	if err := store.MarkContractBad(fcid); err != nil {
+	if err := store.MarkContractBad(fcid, contracts.BadReasonRevisionOutOfSync); err != nil {
 		t.Fatalf("failed to mark contract bad: %v", err)
 	}
 	contract, err = store.Contract(fcid)
@@ -1655,7 +1655,7 @@ func TestMarkContractBad(t *testing.T) {
 	}
 
 	var missingID types.FileContractID
-	if err := store.MarkContractBad(missingID); !errors.Is(err, contracts.ErrNotFound) {
+	if err := store.MarkContractBad(missingID, contracts.BadReasonRevisionOutOfSync); !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got: %v", err)
 	}
 }
@@ -2467,7 +2467,7 @@ func BenchmarkMarkContractBad(b *testing.B) {
 		rIdx := frand.Intn(len(contractIDs))
 		fcid := contractIDs[rIdx]
 		contractIDs = append(contractIDs[:rIdx], contractIDs[rIdx+1:]...)
-		if err := store.MarkContractBad(fcid); err != nil {
+		if err := store.MarkContractBad(fcid, contracts.BadReasonRevisionOutOfSync); err != nil {
 			b.Fatal(err)
 		}
 	}
