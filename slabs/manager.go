@@ -38,6 +38,8 @@ type (
 		numIntegrityCheckGoroutines int
 		numMigrationGoroutines      int
 		repairThreshold             int
+		healthAlertThreshold        float64
+		alertOnRepairFailure        bool
 		integrityCheckTimeout       time.Duration
 
 		runMigrations bool
@@ -234,6 +236,24 @@ func WithRepairThreshold(threshold int) Option {
 	}
 }
 
+// WithHealthAlertThreshold sets the slab-health percentage below which a
+// warning alert is registered. A value in (0, 100] enables the alert.
+func WithHealthAlertThreshold(threshold float64) Option {
+	return func(m *SlabManager) {
+		if threshold <= 0 || threshold > 100 {
+			panic("health alert threshold must be greater than 0 and at most 100") // developer error
+		}
+		m.healthAlertThreshold = threshold
+	}
+}
+
+// WithRepairFailureAlerts enables or disables alerts for failed slab repairs.
+func WithRepairFailureAlerts(enabled bool) Option {
+	return func(m *SlabManager) {
+		m.alertOnRepairFailure = enabled
+	}
+}
+
 // WithMigratorOption applies a MigratorOption to the SlabManager's migrator.
 func WithMigratorOption(opt MigratorOption) Option {
 	return func(m *SlabManager) {
@@ -386,8 +406,14 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 		})
 	}
 
-	// register lost sectors alerts on startup
+	// register health-related alerts on startup
 	m.registerLostSectorsAlert()
+	if m.healthAlertThreshold > 0 {
+		if err := m.updateSlabHealthAlert(ctx); err != nil {
+			m.log.Error("failed to update slab health alert", zap.Error(err))
+		}
+		launch("slab health alert", m.healthCheckInterval, m.updateSlabHealthAlert)
+	}
 	launch("integrity checks", m.healthCheckInterval, m.performIntegrityChecks)
 	launch("prune deleted slabs", m.pruneDeletedSlabsInterval, m.performPruneDeletedSlabs)
 	launch("object event publishing", objectEventPublishInterval, m.performObjectEventPublish)
