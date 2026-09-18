@@ -1,0 +1,44 @@
+FROM golang:1.27 AS builder
+
+WORKDIR /indexd
+
+# Copy module metadata and the local replacement module before downloading
+# dependencies. go.mod contains:
+#   replace go.sia.tech/web/indexd => ./_custom_web_indexd
+COPY go.mod go.sum ./
+COPY _custom_web_indexd ./_custom_web_indexd
+RUN go mod download
+
+# copy source
+COPY . .
+
+# mark as safe in git
+RUN git config --global --add safe.directory .
+
+# codegen
+RUN go generate ./...
+
+# build
+RUN go build -o bin/ -tags='netgo timetzdata' -trimpath -a -ldflags '-s -w' ./cmd/indexd
+
+FROM debian:bookworm-slim
+
+LABEL maintainer="The Sia Foundation <info@sia.tech>" \
+    org.opencontainers.image.description.vendor="The Sia Foundation" \
+    org.opencontainers.image.description="Custom indexd container with MarviBiene/web" \
+    org.opencontainers.image.source="https://github.com/MarviBiene/indexd" \
+    org.opencontainers.image.licenses=MIT
+
+COPY --from=builder /indexd/bin/* /usr/bin/
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+ENV INDEXD_DATA_DIR=/data
+ENV INDEXD_CONFIG_FILE=/data/indexd.yml
+
+VOLUME [ "/data" ]
+
+EXPOSE 9980/tcp
+EXPOSE 9981/tcp
+EXPOSE 9982/tcp
+
+ENTRYPOINT [ "indexd", "-api.admin", ":9980" ]
