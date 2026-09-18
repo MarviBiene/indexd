@@ -462,10 +462,12 @@ func (s *Store) UnblockHost(hk types.PublicKey) error {
 		}
 		_, err = tx.Exec(ctx, `
 			UPDATE contracts AS c
-			SET good = TRUE
+			SET good = TRUE, bad_reason = '', bad_since = NULL
 			FROM hosts h
-			WHERE c.host_id = h.id AND h.public_key = $1
-		`, sqlPublicKey(hk))
+			WHERE c.host_id = h.id
+				AND h.public_key = $1
+				AND c.bad_reason LIKE $2
+		`, sqlPublicKey(hk), contracts.BadReasonHostBlockedPrefix+"%")
 		if err != nil {
 			return fmt.Errorf("failed to update contracts: %w", err)
 		}
