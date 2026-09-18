@@ -76,7 +76,8 @@ var cfg = config.Config{
 		},
 	},
 	Slabs: config.Slabs{
-		Migrations: true,
+		Migrations:      true,
+		RepairThreshold: 1,
 	},
 }
 

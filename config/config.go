@@ -72,6 +72,9 @@ type (
 		MigrationWorkers int `yaml:"migrationWorkers"`
 		// Migrations enables the slab-migration loop. Enabled by default.
 		Migrations bool `yaml:"migrations"`
+		// RepairThreshold is the minimum number of degraded sectors a slab must
+		// have before it is selected for migration. Zero uses the default of 1.
+		RepairThreshold int `yaml:"repairThreshold"`
 	}
 
 	// FileLog configures the file output of the logger.
