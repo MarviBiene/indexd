@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 )
@@ -14,7 +15,8 @@ import (
 func TestBlockBadHosts(t *testing.T) {
 	store := newTestStore(t)
 	hmMock := newHostManagerMock(store)
-	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, store, nil, nil, nil, contracts.NewContractLocker(), hmMock, nil, nil)
+	alerter := alerts.NewManager()
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, store, nil, nil, nil, contracts.NewContractLocker(), hmMock, nil, nil, contracts.WithAlerter(alerter))
 
 	goodHost := hosts.Host{PublicKey: types.PublicKey{1}, Usability: hosts.GoodUsability, Settings: goodSettings}
 	badHost := hosts.Host{PublicKey: types.PublicKey{2}, Usability: hosts.Usability{}, Settings: goodSettings}
@@ -70,6 +72,15 @@ func TestBlockBadHosts(t *testing.T) {
 
 	// a good host shouldn't be blocked
 	assertHostAndContract(goodHost.PublicKey, false, nil)
+
+	gotAlerts, err := alerter.Alerts(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(gotAlerts) != 1 {
+		t.Fatalf("expected one informational bad-host alert, got %d", len(gotAlerts))
+	} else if gotAlerts[0].Severity != alerts.SeverityInfo {
+		t.Fatalf("expected info severity, got %v", gotAlerts[0].Severity)
+	}
 
 	// a bad host and its contract should be blocked
 	assertHostAndContract(badHost.PublicKey, true, storedBadHost.Usability.FailedChecks())

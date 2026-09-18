@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/alerts"
 	client "go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
@@ -128,7 +129,7 @@ type (
 		MaintenanceSettings() (MaintenanceSettings, error)
 		UpdateMaintenanceSettings(ms MaintenanceSettings) error
 
-		MarkContractBad(contractID types.FileContractID) error
+		MarkContractBad(contractID types.FileContractID, reason string) error
 		MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) error
 		MarkBroadcastAttempt(contractID types.FileContractID) error
 		MarkUnrenewableContractsBad(maxProofHeight uint64) error
@@ -179,6 +180,11 @@ type (
 )
 
 type (
+	// Alerter registers user-visible alerts.
+	Alerter interface {
+		RegisterAlert(alert alerts.Alert) error
+	}
+
 	// ContractManagerOpt is a functional option for the ContractManager.
 	ContractManagerOpt func(*ContractManager)
 
@@ -214,6 +220,7 @@ type (
 		syncer        Syncer
 		wallet        Wallet
 		store         Store
+		alerter       Alerter
 
 		client    HostClient
 		signer    rhp.FormContractSigner
@@ -239,6 +246,13 @@ type (
 		sectorRootsBatchSize              uint64
 	}
 )
+
+// WithAlerter configures the alert manager used for informational contract/host events.
+func WithAlerter(alerter Alerter) ContractManagerOpt {
+	return func(cm *ContractManager) {
+		cm.alerter = alerter
+	}
+}
 
 // WithLogger creates the contract manager with a custom logger
 func WithLogger(l *zap.Logger) ContractManagerOpt {
@@ -371,6 +385,20 @@ func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
 			continue
 		}
 		log.Warn("blocking unusable host", zap.Stringer("hostKey", hk), zap.Strings("usability", reasons))
+		if cm.alerter != nil {
+			if err := cm.alerter.RegisterAlert(alerts.Alert{
+				ID:       alerts.RandomAlertID(),
+				Severity: alerts.SeverityInfo,
+				Message:  "Host marked bad",
+				Data: map[string]any{
+					"hostKey": hk.String(),
+					"reasons": reasons,
+				},
+				Timestamp: time.Now(),
+			}); err != nil {
+				log.Warn("failed to register bad host alert", zap.Stringer("hostKey", hk), zap.Error(err))
+			}
+		}
 	}
 	return nil
 }

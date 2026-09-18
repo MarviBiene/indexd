@@ -84,7 +84,7 @@ func (s *mockStore) UpdateContractRevision(contract rhp.ContractRevision, usage 
 	return nil
 }
 
-func (s *mockStore) MarkContractBad(contractID types.FileContractID) error {
+func (s *mockStore) MarkContractBad(contractID types.FileContractID, reason string) error {
 	return nil
 }
 

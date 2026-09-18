@@ -938,6 +938,14 @@ components:
         good:
           type: boolean
           description: Whether the contract is considered healthy and usable. If the contract is bad its data will be migrated to another contract.
+        badReason:
+          type: string
+          description: The reason the contract was marked bad. Empty for good contracts and legacy bad contracts created before reason tracking.
+        badSince:
+          type: string
+          format: date-time
+          nullable: true
+          description: The time the contract was first marked bad, if known.
         state:
           type: string
           description: The state of the contract
