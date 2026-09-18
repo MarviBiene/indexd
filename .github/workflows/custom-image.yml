@@ -97,11 +97,9 @@ jobs:
         run: go test ./...
 
       - name: Setup QEMU
-        if: github.event_name != 'pull_request'
         uses: docker/setup-qemu-action@v3
 
       - name: Setup Buildx
-        if: github.event_name != 'pull_request'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
@@ -112,13 +110,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish custom image
-        if: github.event_name != 'pull_request'
+      - name: Build custom image
         uses: docker/build-push-action@v6
         with:
           context: ./indexd
+          file: ./indexd/Dockerfile.custom
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ghcr.io/marvibiene/indexd:custom
             ghcr.io/marvibiene/indexd:custom-${{ github.sha }}
