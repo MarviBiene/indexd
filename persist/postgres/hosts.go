@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 )
@@ -347,6 +348,13 @@ func (s *Store) BlockedHosts(offset, limit int) ([]types.PublicKey, error) {
 // BlockHosts adds the given host keys to the blocklist and marks all of its
 // contracts as bad. If a host is already on the blocklist, the reasons are
 // updated to include any new reasons for blocking.
+func hostsBadReason(reasons []string) string {
+	if len(reasons) == 0 {
+		return contracts.BadReasonHostBlockedPrefix + "unspecified"
+	}
+	return contracts.BadReasonHostBlockedPrefix + strings.Join(reasons, ", ")
+}
+
 func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		for _, hk := range hks {
@@ -370,7 +378,15 @@ func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 				continue // nothing to update
 			}
 
-			_, err = tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE host_id = $1`, hostID)
+			badReason := hostsBadReason(reasons)
+			_, err = tx.Exec(ctx, `
+UPDATE contracts
+SET
+	good = FALSE,
+	bad_reason = CASE WHEN good THEN $2 ELSE bad_reason END,
+	bad_since = CASE WHEN good THEN NOW() ELSE bad_since END
+WHERE host_id = $1
+`, hostID, badReason)
 			if err != nil {
 				return fmt.Errorf("failed to update contracts: %w", err)
 			}
@@ -503,9 +519,11 @@ func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) 
 		if len(unblocked) > 0 {
 			if _, err := tx.Exec(ctx, `
 				UPDATE contracts c
-				SET good = TRUE
+				SET good = TRUE, bad_reason = '', bad_since = NULL
 				FROM hosts h
-				WHERE c.host_id = h.id AND h.public_key = ANY($1)`, unblocked); err != nil {
+				WHERE c.host_id = h.id
+					AND h.public_key = ANY($1)
+					AND c.bad_reason LIKE $2`, unblocked, contracts.BadReasonHostBlockedPrefix+"%"); err != nil {
 				return fmt.Errorf("failed to mark contracts good: %w", err)
 			}
 		}

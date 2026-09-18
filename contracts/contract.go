@@ -19,6 +19,13 @@ const (
 	ContractStateRejected
 )
 
+const (
+	BadReasonRenewalDeadlineExceeded = "renewal deadline exceeded"
+	BadReasonRevisionOutOfSync       = "revision out of sync"
+	BadReasonManualDelete            = "manually deleted"
+	BadReasonHostBlockedPrefix       = "host blocked: "
+)
+
 var (
 	// ErrNotFound is returned by database operations that fail due to a
 	// contract not being found.
@@ -145,9 +152,11 @@ type (
 		// A contract can be bad for multiple reasons such as the host being
 		// considered bad or failing to renew when being too close to its
 		// ProofHeight. This field is set by the contract maintenance code.
-		Good     bool             `json:"good"`
-		State    ContractState    `json:"state"`
-		Spending ContractSpending `json:"spending"`
+		Good      bool             `json:"good"`
+		BadReason string           `json:"badReason,omitempty"`
+		BadSince  *time.Time       `json:"badSince,omitempty"`
+		State     ContractState    `json:"state"`
+		Spending  ContractSpending `json:"spending"`
 	}
 )
 

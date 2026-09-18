@@ -435,4 +435,11 @@ ALTER TABLE global_settings ADD COLUMN object_events_last_published TIMESTAMP WI
 UPDATE global_settings SET object_events_last_published = COALESCE((SELECT date_trunc('second', MAX(updated_at)) FROM object_events), '-infinity');`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE contracts
+	ADD COLUMN bad_reason TEXT NOT NULL DEFAULT '',
+	ADD COLUMN bad_since TIMESTAMP WITH TIME ZONE;`)
+		return err
+	},
 }

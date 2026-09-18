@@ -60,7 +60,7 @@ type (
 	RevisionStore interface {
 		ContractRevision(contractID types.FileContractID) (rhp.ContractRevision, bool, error)
 		UpdateContractRevision(contract rhp.ContractRevision, usage proto.Usage) error
-		MarkContractBad(contractID types.FileContractID) error
+		MarkContractBad(contractID types.FileContractID, reason string) error
 	}
 
 	// RevisionManager handles contract revision management including syncing
@@ -101,7 +101,7 @@ func (rm *RevisionManager) syncRevision(ctx context.Context, contractID types.Fi
 			zap.Uint64("hostRevisionNumber", resp.Contract.RevisionNumber),
 			zap.Uint64("localRevisionNumber", revision.RevisionNumber),
 		)
-		if err := rm.store.MarkContractBad(contractID); err != nil {
+		if err := rm.store.MarkContractBad(contractID, BadReasonRevisionOutOfSync); err != nil {
 			rm.log.Error("failed to mark contract as bad", zap.Stringer("contractID", contractID), zap.Error(err))
 		}
 		return types.V2FileContract{}, false, errors.New("local revision is newer than host revision")

@@ -204,7 +204,7 @@ func (s *Store) Contract(contractID types.FileContractID) (contracts.Contract, e
 	var contract contracts.Contract
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		contract, err = scanContract(tx.QueryRow(ctx, `
-SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
+SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.bad_reason, c.bad_since, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 WHERE c.contract_id = $1`, sqlHash256(contractID)))
@@ -247,7 +247,7 @@ func (s *Store) Contracts(offset, limit int, queryOpts ...contracts.ContractQuer
 WITH globals AS (
 	SELECT scanned_height FROM global_settings
 )
-SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
+SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.bad_reason, c.bad_since, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 CROSS JOIN globals
@@ -722,13 +722,24 @@ func (s *Store) UpdateNextPrune(contractID types.FileContractID, nextPrune time.
 // whose proof height is at or below maxProofHeight.
 func (s *Store) MarkUnrenewableContractsBad(maxProofHeight uint64) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE state IN (0,1) AND renewed_to IS NULL AND good AND proof_height <= $1`, maxProofHeight)
+		_, err := tx.Exec(ctx, `
+UPDATE contracts
+SET good = FALSE, bad_reason = $2, bad_since = NOW()
+WHERE state IN (0,1) AND renewed_to IS NULL AND good AND proof_height <= $1
+`, maxProofHeight, contracts.BadReasonRenewalDeadlineExceeded)
 		return err
 	})
 }
 
-func (s *Store) markContractBad(ctx context.Context, tx *txn, contractID types.FileContractID) error {
-	res, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(contractID))
+func (s *Store) markContractBad(ctx context.Context, tx *txn, contractID types.FileContractID, reason string) error {
+	res, err := tx.Exec(ctx, `
+UPDATE contracts
+SET
+	good = FALSE,
+	bad_reason = CASE WHEN good THEN $2 ELSE bad_reason END,
+	bad_since = CASE WHEN good THEN NOW() ELSE bad_since END
+WHERE contract_id = $1
+`, sqlHash256(contractID), reason)
 	if err != nil {
 		return fmt.Errorf("failed to mark contract bad: %w", err)
 	} else if res.RowsAffected() != 1 {
@@ -738,9 +749,9 @@ func (s *Store) markContractBad(ctx context.Context, tx *txn, contractID types.F
 }
 
 // MarkContractBad marks a specific contract as bad.
-func (s *Store) MarkContractBad(contractID types.FileContractID) error {
+func (s *Store) MarkContractBad(contractID types.FileContractID, reason string) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		return s.markContractBad(ctx, tx, contractID)
+		return s.markContractBad(ctx, tx, contractID, reason)
 	})
 }
 
@@ -788,7 +799,7 @@ func (s *Store) DeleteContract(contractID types.FileContractID) error {
 		}
 
 		// mark the contract as bad
-		return s.markContractBad(ctx, tx, contractID)
+		return s.markContractBad(ctx, tx, contractID, contracts.BadReasonManualDelete)
 	})
 }
 
@@ -911,7 +922,7 @@ func (tx *updateTx) UpdateContractState(contractID types.FileContractID, state c
 }
 
 func scanContract(row scanner) (contracts.Contract, error) {
-	var lastPrune sql.NullTime
+	var lastPrune, badSince sql.NullTime
 	var c contracts.Contract
 	err := row.Scan((*sqlHash256)(&c.ID),
 		&c.Formation,
@@ -930,6 +941,8 @@ func scanContract(row scanner) (contracts.Contract, error) {
 		(*sqlCurrency)(&c.UsedCollateral),
 		(*sqlCurrency)(&c.TotalCollateral),
 		&c.Good,
+		&c.BadReason,
+		&badSince,
 		(*sqlCurrency)(&c.Spending.AppendSector),
 		(*sqlCurrency)(&c.Spending.FreeSector),
 		(*sqlCurrency)(&c.Spending.FundAccount),
@@ -939,6 +952,9 @@ func scanContract(row scanner) (contracts.Contract, error) {
 	)
 	if lastPrune.Valid {
 		c.NextPrune = lastPrune.Time
+	}
+	if badSince.Valid {
+		c.BadSince = &badSince.Time
 	}
 	return c, err
 }
