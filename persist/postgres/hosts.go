@@ -355,6 +355,7 @@ func hostsBadReason(reasons []string) string {
 	return contracts.BadReasonHostBlockedPrefix + strings.Join(reasons, ", ")
 }
 
+// BlockHosts marks hosts as blocked for the supplied reasons and marks their good contracts bad.
 func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		for _, hk := range hks {

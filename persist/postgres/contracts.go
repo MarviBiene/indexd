@@ -208,7 +208,6 @@ SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_he
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 LEFT JOIN custom_contract_bad_metadata cbm ON cbm.contract_id = c.contract_id
-LEFT JOIN custom_contract_bad_metadata cbm ON cbm.contract_id = c.contract_id
 WHERE c.contract_id = $1`, sqlHash256(contractID)))
 		return err
 	}); errors.Is(err, sql.ErrNoRows) {
@@ -252,6 +251,7 @@ WITH globals AS (
 SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, COALESCE(cbm.bad_reason, ''), cbm.bad_since, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
+LEFT JOIN custom_contract_bad_metadata cbm ON cbm.contract_id = c.contract_id
 CROSS JOIN globals
 WHERE
 	-- good filter

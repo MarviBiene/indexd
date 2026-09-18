@@ -19,6 +19,7 @@ const (
 	ContractStateRejected
 )
 
+// Contract bad reasons are persisted when a contract first becomes unusable.
 const (
 	BadReasonRenewalDeadlineExceeded = "renewal deadline exceeded"
 	BadReasonRevisionOutOfSync       = "revision out of sync"
