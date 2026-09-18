@@ -263,7 +263,7 @@ WHERE
 		($2::boolean = FALSE AND c.state IN (2,3,4))
 	)
 	-- ID filter
-	AND ((CARDINALITY($5::bytea[]) = 0) OR (contract_id = ANY($5)))
+	AND ((CARDINALITY($5::bytea[]) = 0) OR (c.contract_id = ANY($5)))
 	-- public key filter
 	AND ((CARDINALITY($6::bytea[]) = 0) OR (h.public_key = ANY($6)))
 %s -- order by clause
