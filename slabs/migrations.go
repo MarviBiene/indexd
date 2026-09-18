@@ -2,6 +2,7 @@ package slabs
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -82,6 +83,9 @@ type (
 		// UnrecoverableReason is set when the migration proved the slab can
 		// never be fully repaired.
 		UnrecoverableReason string `json:"unrecoverableReason,omitempty"`
+		// FailureReason is set when a repair attempt failed before all required
+		// sectors could be recovered and migrated.
+		FailureReason string `json:"failureReason,omitempty"`
 	}
 )
 
@@ -241,6 +245,33 @@ func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []in
 // migration loop and the remote result-reporting endpoint. All failures are
 // logged; the returned error reports store failures only, so a stale result
 // (e.g. a sector that no longer needs migrating) is not an error.
+func repairFailureAlertID(slabID SlabID) types.Hash256 {
+	buf := make([]byte, 0, len("indexd:slab-repair-failure:")+len(slabID))
+	buf = append(buf, "indexd:slab-repair-failure:"...)
+	buf = append(buf, slabID[:]...)
+	return types.Hash256(sha256.Sum256(buf))
+}
+
+func (m *SlabManager) registerRepairFailureAlert(res MigrationResult, message string) {
+	if !m.alertOnRepairFailure {
+		return
+	}
+	data := map[string]any{"slabID": res.SlabID.String()}
+	if res.FailureReason != "" {
+		data["reason"] = res.FailureReason
+	}
+	if len(res.Migrated) > 0 {
+		data["migratedSectors"] = len(res.Migrated)
+	}
+	_ = m.alerter.RegisterAlert(alerts.Alert{
+		ID:        repairFailureAlertID(res.SlabID),
+		Severity:  alerts.SeverityError,
+		Message:   message,
+		Data:      data,
+		Timestamp: time.Now(),
+	})
+}
+
 func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger) error {
 	var errs []error
 	// group lost sectors by host so each host is marked in a single call
@@ -260,6 +291,9 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 	// if recovery failed, leave the repair state untouched so the slab is
 	// retried without incurring a repair-failure backoff.
 	if !res.Recovered {
+		if res.FailureReason != "" {
+			m.registerRepairFailureAlert(res, "Slab repair failed")
+		}
 		return errors.Join(errs...)
 	}
 
@@ -302,6 +336,11 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 	}
 
 	success := res.Success && persisted == len(res.Migrated)
+	if success {
+		m.alerter.DismissAlerts(repairFailureAlertID(res.SlabID))
+	} else {
+		m.registerRepairFailureAlert(res, "Slab repair incomplete")
+	}
 	if err := m.store.MarkSlabRepaired(res.SlabID, success); errors.Is(err, ErrSlabNotFound) {
 		// the slab was deleted after the migration was prepared; staleness,
 		// not a store failure
@@ -407,6 +446,7 @@ func (m *Migrator) MigrateSlab(ctx context.Context, slab Slab, state MigrationSt
 	log = log.With(zap.Duration("downloadElapsed", downloadElapsed), zap.Duration("uploadElapsed", uploadElapsed), zap.Int("migrated", len(res.Migrated)))
 	if err != nil {
 		if ctx.Err() == nil {
+			res.FailureReason = err.Error()
 			log.Error("failed to recover slab", zap.Error(err))
 		}
 		return res, true

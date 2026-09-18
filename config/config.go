@@ -75,6 +75,11 @@ type (
 		// RepairThreshold is the minimum number of degraded sectors a slab must
 		// have before it is selected for migration. Zero uses the default of 1.
 		RepairThreshold int `yaml:"repairThreshold"`
+		// HealthAlertThreshold registers a warning when the worst recoverable
+		// slab health falls below this percentage. Zero disables the alert.
+		HealthAlertThreshold float64 `yaml:"healthAlertThreshold,omitempty"`
+		// AlertOnRepairFailure registers an error alert when a slab repair fails.
+		AlertOnRepairFailure bool `yaml:"alertOnRepairFailure,omitempty"`
 	}
 
 	// FileLog configures the file output of the logger.

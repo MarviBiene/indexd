@@ -1487,6 +1487,33 @@ components:
           type: integer
           format: int64
           description: Number of migration-eligible slabs with at least one consecutive failed repair attempt
+        worstSlabHealth:
+          type: number
+          format: double
+          description: Health percentage of the worst recoverable slab, based on currently good sectors
+        worstSlabGoodSectors:
+          type: integer
+          format: int64
+          description: Number of currently good sectors in the worst recoverable slab
+        worstSlabTotalSectors:
+          type: integer
+          format: int64
+          description: Total number of sectors in the worst recoverable slab
+        worstSlabMinShards:
+          type: integer
+          format: int64
+          description: Minimum shards required to recover the worst recoverable slab
+        worstSlabDegradedSectors:
+          type: integer
+          format: int64
+          description: Number of degraded sectors in the worst recoverable slab
+        worstSlabRecoveryMargin:
+          type: integer
+          format: int64
+          description: Number of additional good sectors the worst recoverable slab can lose before falling below minShards
+        worstSlabID:
+          type: string
+          description: Hex digest of the worst recoverable slab
         migrated:
           type: integer
           format: int64

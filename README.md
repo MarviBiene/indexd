@@ -156,6 +156,8 @@ slabs:
     migrationWorkers: 16 # number of slabs to migrate in parallel (0 defaults to runtime.NumCPU())
     migrations: true # run slab migrations (set to false to outsource migrations to a remote node)
     repairThreshold: 1 # minimum degraded sectors in a slab before migration starts (0 defaults to 1)
+    healthAlertThreshold: 60 # optional warning threshold in percent; 0/omit disables
+    alertOnRepairFailure: true # show an error alert when a repair attempt fails
 log:
     stdout:
         enabled: true # enable logging to stdout

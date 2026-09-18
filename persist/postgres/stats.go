@@ -220,14 +220,55 @@ WITH bad_sectors AS (
 	FROM slab_sectors ss
 	INNER JOIN bad_sectors bs ON bs.id = ss.sector_id
 ), degraded AS (
-	SELECT slab_id, COUNT(*) AS degraded_sectors
+	SELECT slab_id, COUNT(*)::BIGINT AS degraded_sectors
 	FROM degraded_refs
 	GROUP BY slab_id
 ), recoverable AS (
-	SELECT d.slab_id, d.degraded_sectors, s.consecutive_failed_repairs, s.next_repair_attempt
+	SELECT
+		d.slab_id,
+		d.degraded_sectors,
+		s.digest,
+		s.min_shards,
+		s.consecutive_failed_repairs,
+		s.next_repair_attempt,
+		(SELECT COUNT(*)::BIGINT FROM slab_sectors ss WHERE ss.slab_id = d.slab_id) AS total_sectors
 	FROM degraded d
 	INNER JOIN slabs s ON s.id = d.slab_id
 	WHERE NOT s.unrecoverable
+), worst_degraded AS (
+	SELECT
+		r.*,
+		(r.total_sectors - r.degraded_sectors) AS good_sectors,
+		(r.total_sectors - r.degraded_sectors - r.min_shards)::BIGINT AS recovery_margin
+	FROM recoverable r
+	WHERE r.total_sectors > 0
+	ORDER BY
+		((r.total_sectors - r.degraded_sectors)::DOUBLE PRECISION / r.total_sectors) ASC,
+		(r.total_sectors - r.degraded_sectors - r.min_shards) ASC,
+		r.slab_id ASC
+	LIMIT 1
+), healthy_fallback AS (
+	SELECT
+		s.id AS slab_id,
+		0::BIGINT AS degraded_sectors,
+		s.digest,
+		s.min_shards,
+		s.consecutive_failed_repairs,
+		s.next_repair_attempt,
+		COUNT(ss.sector_id)::BIGINT AS total_sectors,
+		COUNT(ss.sector_id)::BIGINT AS good_sectors,
+		(COUNT(ss.sector_id) - s.min_shards)::BIGINT AS recovery_margin
+	FROM slabs s
+	INNER JOIN slab_sectors ss ON ss.slab_id = s.id
+	WHERE NOT s.unrecoverable
+		AND NOT EXISTS (SELECT 1 FROM worst_degraded)
+	GROUP BY s.id, s.digest, s.min_shards, s.consecutive_failed_repairs, s.next_repair_attempt
+	ORDER BY s.id ASC
+	LIMIT 1
+), worst AS (
+	SELECT * FROM worst_degraded
+	UNION ALL
+	SELECT * FROM healthy_fallback
 )
 SELECT
 	COUNT(*),
@@ -241,7 +282,14 @@ SELECT
 		INNER JOIN slabs s ON s.id = dr.slab_id
 		WHERE NOT s.unrecoverable
 	), 0),
-	COUNT(*) FILTER (WHERE degraded_sectors >= $1 AND consecutive_failed_repairs > 0)
+	COUNT(*) FILTER (WHERE degraded_sectors >= $1 AND consecutive_failed_repairs > 0),
+	COALESCE((SELECT 100.0 * good_sectors::DOUBLE PRECISION / total_sectors FROM worst), 100.0),
+	COALESCE((SELECT good_sectors FROM worst), 0),
+	COALESCE((SELECT total_sectors FROM worst), 0),
+	COALESCE((SELECT min_shards::BIGINT FROM worst), 0),
+	COALESCE((SELECT degraded_sectors FROM worst), 0),
+	COALESCE((SELECT recovery_margin FROM worst), 0),
+	COALESCE((SELECT encode(digest, 'hex') FROM worst), '')
 FROM recoverable
 `, threshold).Scan(
 			&stats.DegradedSlabs,
@@ -251,6 +299,13 @@ FROM recoverable
 			&stats.DeferredMigrationSlabs,
 			&stats.DegradedSectors,
 			&stats.RetryingSlabs,
+			&stats.WorstSlabHealth,
+			&stats.WorstSlabGoodSectors,
+			&stats.WorstSlabTotalSectors,
+			&stats.WorstSlabMinShards,
+			&stats.WorstSlabDegradedSectors,
+			&stats.WorstSlabRecoveryMargin,
+			&stats.WorstSlabID,
 		)
 	})
 	return stats, err

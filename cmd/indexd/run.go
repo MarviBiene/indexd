@@ -259,7 +259,13 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	if cfg.Slabs.RepairThreshold > 0 {
 		slabOpts = append(slabOpts, slabs.WithRepairThreshold(cfg.Slabs.RepairThreshold))
 	}
-	slabOpts = append(slabOpts, slabs.WithMigrations(cfg.Slabs.Migrations))
+	if cfg.Slabs.HealthAlertThreshold > 0 {
+		slabOpts = append(slabOpts, slabs.WithHealthAlertThreshold(cfg.Slabs.HealthAlertThreshold))
+	}
+	slabOpts = append(slabOpts,
+		slabs.WithRepairFailureAlerts(cfg.Slabs.AlertOnRepairFailure),
+		slabs.WithMigrations(cfg.Slabs.Migrations),
+	)
 	migrationKey, integrityKey := slabs.DeriveAccountKeys(walletKey)
 	slabs, err := slabs.NewManager(am, contracts, hm, store, client, alerter, migrationKey, integrityKey, slabOpts...)
 	if err != nil {
