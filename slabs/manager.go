@@ -153,7 +153,7 @@ type (
 		BlockedObjects(offset, limit int) ([]BlockedObject, error)
 
 		ObjectsForSlab(slabID SlabID) ([]SlabObject, error)
-		SectorStats() (SectorsStats, error)
+		SectorStats(repairThreshold ...int) (SectorsStats, error)
 	}
 
 	// AlertsManager defines an interface to register alerts.

@@ -1448,6 +1448,29 @@ components:
           type: integer
           format: int64
           description: Number of slabs currently pinned by this instance
+        repairThreshold:
+          type: integer
+          description: Number of degraded sectors a recoverable slab must have before it becomes eligible for migration
+        degradedSlabs:
+          type: integer
+          format: int64
+          description: Number of recoverable slabs that currently have at least one sector needing migration
+        waitingForThresholdSlabs:
+          type: integer
+          format: int64
+          description: Number of degraded recoverable slabs still below the configured repair threshold
+        toMigrateSlabs:
+          type: integer
+          format: int64
+          description: Number of degraded recoverable slabs at or above the configured repair threshold
+        degradedSectors:
+          type: integer
+          format: int64
+          description: Number of distinct sectors needing migration across recoverable slabs
+        retryingSlabs:
+          type: integer
+          format: int64
+          description: Number of migration-eligible slabs with at least one consecutive failed repair attempt
         migrated:
           type: integer
           format: int64
