@@ -29,6 +29,8 @@ type SectorsStats struct {
 	DegradedSlabs            int64 `json:"degradedSlabs"`
 	WaitingForThresholdSlabs int64 `json:"waitingForThresholdSlabs"`
 	ToMigrateSlabs           int64 `json:"toMigrateSlabs"`
+	ReadyToMigrateSlabs      int64 `json:"readyToMigrateSlabs"`
+	DeferredMigrationSlabs   int64 `json:"deferredMigrationSlabs"`
 	DegradedSectors          int64 `json:"degradedSectors"`
 	RetryingSlabs            int64 `json:"retryingSlabs"`
 }

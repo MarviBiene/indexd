@@ -1463,6 +1463,14 @@ components:
           type: integer
           format: int64
           description: Number of degraded recoverable slabs at or above the configured repair threshold
+        readyToMigrateSlabs:
+          type: integer
+          format: int64
+          description: Number of migration-eligible slabs whose repair backoff has elapsed and can be claimed now
+        deferredMigrationSlabs:
+          type: integer
+          format: int64
+          description: Number of migration-eligible slabs currently claimed or waiting for their next repair attempt
         degradedSectors:
           type: integer
           format: int64

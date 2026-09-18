@@ -224,7 +224,7 @@ WITH bad_sectors AS (
 	FROM degraded_refs
 	GROUP BY slab_id
 ), recoverable AS (
-	SELECT d.slab_id, d.degraded_sectors, s.consecutive_failed_repairs
+	SELECT d.slab_id, d.degraded_sectors, s.consecutive_failed_repairs, s.next_repair_attempt
 	FROM degraded d
 	INNER JOIN slabs s ON s.id = d.slab_id
 	WHERE NOT s.unrecoverable
@@ -233,6 +233,8 @@ SELECT
 	COUNT(*),
 	COUNT(*) FILTER (WHERE degraded_sectors < $1),
 	COUNT(*) FILTER (WHERE degraded_sectors >= $1),
+	COUNT(*) FILTER (WHERE degraded_sectors >= $1 AND next_repair_attempt <= NOW()),
+	COUNT(*) FILTER (WHERE degraded_sectors >= $1 AND next_repair_attempt > NOW()),
 	COALESCE((
 		SELECT COUNT(DISTINCT dr.sector_id)
 		FROM degraded_refs dr
@@ -245,6 +247,8 @@ FROM recoverable
 			&stats.DegradedSlabs,
 			&stats.WaitingForThresholdSlabs,
 			&stats.ToMigrateSlabs,
+			&stats.ReadyToMigrateSlabs,
+			&stats.DeferredMigrationSlabs,
 			&stats.DegradedSectors,
 			&stats.RetryingSlabs,
 		)

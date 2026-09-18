@@ -185,7 +185,7 @@ WHERE id IN (
 		}
 	}
 
-	assertQueue := func(degraded, waiting, toMigrate, sectors, retrying int64) {
+	assertQueue := func(degraded, waiting, toMigrate, ready, deferred, sectors, retrying int64) {
 		t.Helper()
 		stats, err := store.SectorStats(5)
 		if err != nil {
@@ -198,6 +198,10 @@ WHERE id IN (
 			t.Fatalf("expected %d slabs waiting for threshold, got %d", waiting, stats.WaitingForThresholdSlabs)
 		} else if stats.ToMigrateSlabs != toMigrate {
 			t.Fatalf("expected %d slabs to migrate, got %d", toMigrate, stats.ToMigrateSlabs)
+		} else if stats.ReadyToMigrateSlabs != ready {
+			t.Fatalf("expected %d ready-to-migrate slabs, got %d", ready, stats.ReadyToMigrateSlabs)
+		} else if stats.DeferredMigrationSlabs != deferred {
+			t.Fatalf("expected %d deferred migration slabs, got %d", deferred, stats.DeferredMigrationSlabs)
 		} else if stats.DegradedSectors != sectors {
 			t.Fatalf("expected %d degraded sectors, got %d", sectors, stats.DegradedSectors)
 		} else if stats.RetryingSlabs != retrying {
@@ -205,26 +209,26 @@ WHERE id IN (
 		}
 	}
 
-	assertQueue(0, 0, 0, 0, 0)
+	assertQueue(0, 0, 0, 0, 0, 0, 0)
 
 	// Four bad sectors are visible as degraded but remain below threshold 5.
 	markLost(4)
-	assertQueue(1, 1, 0, 4, 0)
+	assertQueue(1, 1, 0, 0, 0, 4, 0)
 
 	// The fifth bad sector makes the slab migration-eligible.
 	markLost(1)
-	assertQueue(1, 0, 1, 5, 0)
+	assertQueue(1, 0, 1, 1, 0, 5, 0)
 
 	// Failed attempts remain in the migration queue and surface as retries.
 	if err := store.MarkSlabRepaired(slabID, false); err != nil {
 		t.Fatal(err)
 	}
-	assertQueue(1, 0, 1, 5, 1)
+	assertQueue(1, 0, 1, 0, 1, 5, 1)
 
 	if err := store.MarkSlabRepaired(slabID, false); err != nil {
 		t.Fatal(err)
 	}
-	assertQueue(1, 0, 1, 5, 1)
+	assertQueue(1, 0, 1, 0, 1, 5, 1)
 	if stats, err := store.SectorStats(5); err != nil {
 		t.Fatal(err)
 	} else if stats.StuckSlabs != 1 {
@@ -235,7 +239,7 @@ WHERE id IN (
 	if err := store.MarkSlabUnrecoverable(slabID, "test"); err != nil {
 		t.Fatal(err)
 	}
-	assertQueue(0, 0, 0, 0, 0)
+	assertQueue(0, 0, 0, 0, 0, 0, 0)
 	if stats, err := store.SectorStats(5); err != nil {
 		t.Fatal(err)
 	} else if stats.UnrecoverableSlabs != 1 {
