@@ -204,9 +204,11 @@ func (s *Store) Contract(contractID types.FileContractID) (contracts.Contract, e
 	var contract contracts.Contract
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		contract, err = scanContract(tx.QueryRow(ctx, `
-SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.bad_reason, c.bad_since, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
+SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, COALESCE(cbm.bad_reason, ''), cbm.bad_since, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
+LEFT JOIN custom_contract_bad_metadata cbm ON cbm.contract_id = c.contract_id
+LEFT JOIN custom_contract_bad_metadata cbm ON cbm.contract_id = c.contract_id
 WHERE c.contract_id = $1`, sqlHash256(contractID)))
 		return err
 	}); errors.Is(err, sql.ErrNoRows) {
@@ -247,7 +249,7 @@ func (s *Store) Contracts(offset, limit int, queryOpts ...contracts.ContractQuer
 WITH globals AS (
 	SELECT scanned_height FROM global_settings
 )
-SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.bad_reason, c.bad_since, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
+SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, COALESCE(cbm.bad_reason, ''), cbm.bad_since, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 CROSS JOIN globals
@@ -723,29 +725,40 @@ func (s *Store) UpdateNextPrune(contractID types.FileContractID, nextPrune time.
 func (s *Store) MarkUnrenewableContractsBad(maxProofHeight uint64) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
-UPDATE contracts
-SET good = FALSE, bad_reason = $2, bad_since = NOW()
-WHERE state IN (0,1) AND renewed_to IS NULL AND good AND proof_height <= $1
+WITH marked AS (
+	UPDATE contracts
+	SET good = FALSE
+	WHERE state IN (0,1) AND renewed_to IS NULL AND good AND proof_height <= $1
+	RETURNING contract_id
+)
+INSERT INTO custom_contract_bad_metadata (contract_id, bad_reason, bad_since)
+SELECT contract_id, $2, NOW() FROM marked
+ON CONFLICT (contract_id) DO NOTHING
 `, maxProofHeight, contracts.BadReasonRenewalDeadlineExceeded)
 		return err
 	})
 }
 
 func (s *Store) markContractBad(ctx context.Context, tx *txn, contractID types.FileContractID, reason string) error {
-	res, err := tx.Exec(ctx, `
-UPDATE contracts
-SET
-	good = FALSE,
-	bad_reason = CASE WHEN good THEN $2 ELSE bad_reason END,
-	bad_since = CASE WHEN good THEN NOW() ELSE bad_since END
-WHERE contract_id = $1
-`, sqlHash256(contractID), reason)
-	if err != nil {
-		return fmt.Errorf("failed to mark contract bad: %w", err)
-	} else if res.RowsAffected() != 1 {
+	var good bool
+	err := tx.QueryRow(ctx, `SELECT good FROM contracts WHERE contract_id = $1 FOR UPDATE`, sqlHash256(contractID)).Scan(&good)
+	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch contract status: %w", err)
+	} else if !good {
+		return nil
 	}
-	return nil
+
+	if _, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(contractID)); err != nil {
+		return fmt.Errorf("failed to mark contract bad: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+INSERT INTO custom_contract_bad_metadata (contract_id, bad_reason, bad_since)
+VALUES ($1, $2, NOW())
+ON CONFLICT (contract_id) DO NOTHING
+`, sqlHash256(contractID), reason)
+	return err
 }
 
 // MarkContractBad marks a specific contract as bad.

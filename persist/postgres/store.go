@@ -177,7 +177,20 @@ func NewStore(ctx context.Context, ci ConnectionInfo, defaultMaintenanceSettings
 		return nil, fmt.Errorf("database version %v is newer than expected %v. database downgrades are not supported", version, target)
 	}
 
+	if err := ensureCustomContractBadMetadata(ctx, pool); err != nil {
+		return nil, fmt.Errorf("failed to initialize custom contract bad metadata: %w", err)
+	}
 	return s, nil
+}
+
+func ensureCustomContractBadMetadata(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, `
+CREATE TABLE IF NOT EXISTS custom_contract_bad_metadata (
+	contract_id BYTEA PRIMARY KEY REFERENCES contracts(contract_id) ON DELETE CASCADE CHECK (LENGTH(contract_id) = 32),
+	bad_reason TEXT NOT NULL,
+	bad_since TIMESTAMP WITH TIME ZONE NOT NULL
+)`)
+	return err
 }
 
 func ensureDatabase(ctx context.Context, ci ConnectionInfo) error {

@@ -283,8 +283,6 @@ CREATE TABLE contracts (
 
   -- contract state
   good BOOLEAN NOT NULL DEFAULT TRUE,
-  bad_reason TEXT NOT NULL DEFAULT '',
-  bad_since TIMESTAMP WITH TIME ZONE,
 
   -- spending (not ACID)
   append_sector_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,

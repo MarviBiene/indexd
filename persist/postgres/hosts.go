@@ -378,14 +378,17 @@ func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 				continue // nothing to update
 			}
 
-			badReason := hostsBadReason(reasons)
+			badReason := hostsBadReason(updated)
 			_, err = tx.Exec(ctx, `
-UPDATE contracts
-SET
-	good = FALSE,
-	bad_reason = CASE WHEN good THEN $2 ELSE bad_reason END,
-	bad_since = CASE WHEN good THEN NOW() ELSE bad_since END
-WHERE host_id = $1
+WITH marked AS (
+	UPDATE contracts
+	SET good = FALSE
+	WHERE host_id = $1 AND good
+	RETURNING contract_id
+)
+INSERT INTO custom_contract_bad_metadata (contract_id, bad_reason, bad_since)
+SELECT contract_id, $2, NOW() FROM marked
+ON CONFLICT (contract_id) DO NOTHING
 `, hostID, badReason)
 			if err != nil {
 				return fmt.Errorf("failed to update contracts: %w", err)
@@ -461,12 +464,18 @@ func (s *Store) UnblockHost(hk types.PublicKey) error {
 			return fmt.Errorf("failed to remove host %q from blocklist: %w", hk, err)
 		}
 		_, err = tx.Exec(ctx, `
-			UPDATE contracts AS c
-			SET good = TRUE, bad_reason = '', bad_since = NULL
-			FROM hosts h
-			WHERE c.host_id = h.id
-				AND h.public_key = $1
-				AND c.bad_reason LIKE $2
+WITH restored AS (
+	UPDATE contracts AS c
+	SET good = TRUE
+	FROM hosts h, custom_contract_bad_metadata cbm
+	WHERE c.host_id = h.id
+		AND h.public_key = $1
+		AND cbm.contract_id = c.contract_id
+		AND cbm.bad_reason LIKE $2
+	RETURNING c.contract_id
+)
+DELETE FROM custom_contract_bad_metadata
+WHERE contract_id IN (SELECT contract_id FROM restored)
 		`, sqlPublicKey(hk), contracts.BadReasonHostBlockedPrefix+"%")
 		if err != nil {
 			return fmt.Errorf("failed to update contracts: %w", err)
@@ -520,12 +529,19 @@ func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) 
 		// mark the fully-unblocked hosts' contracts good again.
 		if len(unblocked) > 0 {
 			if _, err := tx.Exec(ctx, `
-				UPDATE contracts c
-				SET good = TRUE, bad_reason = '', bad_since = NULL
-				FROM hosts h
-				WHERE c.host_id = h.id
-					AND h.public_key = ANY($1)
-					AND c.bad_reason LIKE $2`, unblocked, contracts.BadReasonHostBlockedPrefix+"%"); err != nil {
+WITH restored AS (
+	UPDATE contracts c
+	SET good = TRUE
+	FROM hosts h, custom_contract_bad_metadata cbm
+	WHERE c.host_id = h.id
+		AND h.public_key = ANY($1)
+		AND cbm.contract_id = c.contract_id
+		AND cbm.bad_reason LIKE $2
+	RETURNING c.contract_id
+)
+DELETE FROM custom_contract_bad_metadata
+WHERE contract_id IN (SELECT contract_id FROM restored)
+			`, unblocked, contracts.BadReasonHostBlockedPrefix+"%"); err != nil {
 				return fmt.Errorf("failed to mark contracts good: %w", err)
 			}
 		}
