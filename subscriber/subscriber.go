@@ -206,6 +206,13 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 			return fmt.Errorf("failed to apply updates: %w", err)
 		}
 
+		// Prune behind the subscriber as it catches up. This keeps historical
+		// block bodies from accumulating during a full rescan while preserving
+		// enough recent blocks for the configured reorg window.
+		if s.pruneTarget > 0 && index.Height > s.pruneTarget {
+			s.cm.PruneBlocks(index.Height - s.pruneTarget)
+		}
+
 		if time.Since(lastUpdate) > 5*time.Minute {
 			s.log.Debug("syncing", zap.Uint64("height", index.Height), zap.Stringer("id", index.ID))
 			lastUpdate = time.Now()

@@ -72,12 +72,27 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 
 	walletAddress := types.StandardUnlockHash(walletKey.PublicKey())
+	consensusPath := consensusDBPath(cfg.Directory)
+	if err := recoverConsensusCompaction(consensusPath); err != nil {
+		return fmt.Errorf("failed to recover interrupted consensus compaction: %w", err)
+	}
 	consensusExists, err := consensusExists(cfg.Directory)
 	if err != nil {
 		return fmt.Errorf("failed to check if consensus exists: %w", err)
 	}
 
-	var dbstore *chain.DBStore
+	var (
+		bdb     *coreutils.BoltChainDB
+		dbstore *chain.DBStore
+	)
+	defer func() {
+		if bdb != nil {
+			if err := bdb.Close(); err != nil {
+				log.Error("failed to close consensus database", zap.Error(err))
+			}
+		}
+	}()
+
 	minPruneTarget := uint64(6 * time.Hour / network.BlockInterval)
 	if instantSync && cfg.Consensus.PruneTarget == 0 {
 		// default to 6 hours of blocks
@@ -132,11 +147,10 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 			return fmt.Errorf("failed to set checkpoint in store: %w", err)
 		}
 
-		bdb, err := coreutils.OpenBoltChainDB(filepath.Join(cfg.Directory, "consensus.db"))
+		bdb, err = coreutils.OpenBoltChainDB(consensusPath)
 		if err != nil {
 			return fmt.Errorf("failed to open consensus database: %w", err)
 		}
-		defer bdb.Close()
 
 		dbstore, err = chain.NewDBStoreAtCheckpoint(bdb, cs, b, chain.NewZapMigrationLogger(log.Named("chaindb")))
 		if err != nil {
@@ -149,11 +163,10 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 			log.Debug("instant sync skipped: consensus database already exists")
 		}
 
-		bdb, err := coreutils.OpenBoltChainDB(filepath.Join(cfg.Directory, "consensus.db"))
+		bdb, err = coreutils.OpenBoltChainDB(consensusPath)
 		if err != nil {
 			return fmt.Errorf("failed to open consensus database: %w", err)
 		}
-		defer bdb.Close()
 
 		dbstore, err = chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(log.Named("chaindb")))
 		if err != nil {
@@ -161,6 +174,63 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		}
 	}
 	cm := chain.NewManager(dbstore, chain.WithLog(log.Named("chain")))
+
+	// If the subscriber has already processed the local chain tip, it is safe to
+	// prune old block bodies before starting network services. bbolt keeps freed
+	// pages in the database file, so large databases are compacted after pruning
+	// when enough space can actually be reclaimed.
+	if cfg.Consensus.PruneTarget > 0 {
+		scanned, err := store.LastScannedIndex()
+		if err != nil {
+			return fmt.Errorf("failed to get last scanned index before consensus compaction: %w", err)
+		}
+		tip := cm.Tip()
+		if scanned == tip && tip.Height > cfg.Consensus.PruneTarget {
+			cm.PruneBlocks(tip.Height - cfg.Consensus.PruneTarget)
+			if err := bdb.Scratchpad().Flush(); err != nil {
+				return fmt.Errorf("failed to flush consensus pruning: %w", err)
+			}
+
+			info, err := os.Stat(consensusPath)
+			if err != nil {
+				return fmt.Errorf("failed to stat consensus database: %w", err)
+			}
+			if info.Size() >= consensusCompactMinSize {
+				if err := bdb.Close(); err != nil {
+					return fmt.Errorf("failed to close consensus database before compaction: %w", err)
+				}
+				bdb = nil
+
+				compacted, before, after, reclaimable, compactErr := compactConsensusDBIfNeeded(consensusPath, log)
+				if compactErr != nil {
+					log.Warn("consensus database compaction failed; continuing with the original database", zap.Error(compactErr))
+					if err := recoverConsensusCompaction(consensusPath); err != nil {
+						return fmt.Errorf("failed to recover consensus database after compaction error: %w", err)
+					}
+				}
+				if compacted {
+					log.Info("compacted consensus database",
+						zap.Int64("beforeBytes", before),
+						zap.Int64("afterBytes", after),
+						zap.Int64("reclaimedBytes", before-after))
+				} else {
+					log.Debug("consensus database compaction not needed",
+						zap.Int64("sizeBytes", before),
+						zap.Int64("reclaimableBytes", reclaimable))
+				}
+
+				bdb, err = coreutils.OpenBoltChainDB(consensusPath)
+				if err != nil {
+					return fmt.Errorf("failed to reopen consensus database after compaction: %w", err)
+				}
+				dbstore, err = chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(log.Named("chaindb")))
+				if err != nil {
+					return fmt.Errorf("failed to recreate chain store after compaction: %w", err)
+				}
+				cm = chain.NewManager(dbstore, chain.WithLog(log.Named("chain")))
+			}
+		}
+	}
 
 	syncerListener, err := net.Listen("tcp", cfg.Syncer.Address)
 	if err != nil {
