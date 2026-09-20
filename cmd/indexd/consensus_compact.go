@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	bolt "go.etcd.io/bbolt"
+	"go.uber.org/zap"
 )
 
 const (
@@ -102,7 +103,7 @@ func checkConsensusDB(path string) error {
 	})
 }
 
-func compactConsensusDBIfNeeded(path string) (compacted bool, before, after, reclaimable int64, err error) {
+func compactConsensusDBIfNeeded(path string, log *zap.Logger) (compacted bool, before, after, reclaimable int64, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return false, 0, 0, 0, err
@@ -118,6 +119,10 @@ func compactConsensusDBIfNeeded(path string) (compacted bool, before, after, rec
 	} else if !shouldCompactConsensusDB(before, reclaimable) {
 		return false, before, before, reclaimable, nil
 	}
+
+	log.Info("compacting consensus database",
+		zap.Int64("sizeBytes", before),
+		zap.Int64("reclaimableBytes", reclaimable))
 
 	temp := consensusCompactTempPath(path)
 	backup := consensusCompactBackupPath(path)
