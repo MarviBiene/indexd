@@ -201,9 +201,12 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 				}
 				bdb = nil
 
-				compacted, before, after, reclaimable, err := compactConsensusDBIfNeeded(consensusPath)
-				if err != nil {
-					return fmt.Errorf("failed to compact consensus database: %w", err)
+				compacted, before, after, reclaimable, compactErr := compactConsensusDBIfNeeded(consensusPath, log)
+				if compactErr != nil {
+					log.Warn("consensus database compaction failed; continuing with the original database", zap.Error(compactErr))
+					if err := recoverConsensusCompaction(consensusPath); err != nil {
+						return fmt.Errorf("failed to recover consensus database after compaction error: %w", err)
+					}
 				}
 				if compacted {
 					log.Info("compacted consensus database",
