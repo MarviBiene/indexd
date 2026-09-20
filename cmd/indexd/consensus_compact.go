@@ -140,7 +140,7 @@ func compactConsensusDBIfNeeded(path string, log *zap.Logger) (compacted bool, b
 
 	dst, err := bolt.Open(temp, info.Mode().Perm(), nil)
 	if err != nil {
-		src.Close()
+		_ = src.Close()
 		return false, before, before, reclaimable, fmt.Errorf("failed to create compacted consensus database: %w", err)
 	}
 
