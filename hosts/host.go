@@ -129,6 +129,8 @@ type (
 		Settings               proto4.HostSettings `json:"settings"`
 		Usability              Usability           `json:"usability"`
 		Blocked                bool                `json:"blocked"`
+		ActiveContract         bool                `json:"activeContract"`
+		Lifecycle              string              `json:"lifecycle"`
 		BlockedReasons         []string            `json:"blockedReasons"`
 		LostSectors            uint64              `json:"lostSectors"`
 		UnpinnedSectors        uint64              `json:"unpinnedSectors"`
@@ -137,6 +139,18 @@ type (
 		StuckSince             time.Time           `json:"stuckSince,omitempty"`
 	}
 )
+
+// LifecycleStatus distinguishes a temporary usability failure from an explicit
+// operator-controlled block. Neither changes the validity of existing data.
+func (h Host) LifecycleStatus() string {
+	if h.Blocked {
+		return "permanentBan"
+	}
+	if !h.Usability.Usable() {
+		return "quarantine"
+	}
+	return "healthy"
+}
 
 // HasPoolSupport reports whether the host supports RHP4 balance pools.
 func (h Host) HasPoolSupport() bool {
