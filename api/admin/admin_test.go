@@ -1101,13 +1101,13 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if !h1.Blocked {
 		t.Fatal("expected host to be blocked", h1.Blocked)
-	} else if !reflect.DeepEqual(h1.BlockedReasons, []string{t.Name()}) {
+	} else if !reflect.DeepEqual(h1.BlockedReasons, []string{"ManualBan", t.Name()}) {
 		t.Fatalf("expected host to be blocked with reasons %s, got %s", t.Name(), h1.BlockedReasons)
 	} else if h2, err := adminClient.Host(context.Background(), h2.PublicKey()); err != nil {
 		t.Fatal(err)
 	} else if !h2.Blocked {
 		t.Fatal("expected host to be blocked", h2.Blocked)
-	} else if !reflect.DeepEqual(h2.BlockedReasons, []string{t.Name()}) {
+	} else if !reflect.DeepEqual(h2.BlockedReasons, []string{"ManualBan", t.Name()}) {
 		t.Fatalf("expected host to be blocked with reasons %s, got %s", t.Name(), h2.BlockedReasons)
 	}
 
