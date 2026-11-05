@@ -42,7 +42,7 @@ type (
 		mu          sync.Mutex
 		rates       []decimal.Decimal
 		average     decimal.Decimal
-		lastApplied decimal.Decimal // average exchange rate used by the stored limits
+		lastApplied decimal.Decimal // raw exchange rate used by the stored limits
 		currency    string
 	}
 
@@ -174,7 +174,7 @@ func (pm *PinManager) updatePrices(ctx context.Context, force bool, log *zap.Log
 		return fmt.Errorf("failed to update host usability settings, %w", err)
 	}
 	pm.mu.Lock()
-	pm.lastApplied = pm.average
+	pm.lastApplied = decimal.NewFromFloat(rate)
 	pm.mu.Unlock()
 	return nil
 }
