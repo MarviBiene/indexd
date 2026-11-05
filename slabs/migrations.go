@@ -475,7 +475,10 @@ func sectorsToMigrate(slab Slab, state MigrationState) ([]int, []types.PublicKey
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range state.Hosts {
-		if host.IsGood() {
+		// Quarantined hosts remain valid sources of existing sectors. Avoid
+		// expensive migration for a temporary price or connectivity failure.
+		// New migration destinations remain gated by GoodForUpload below.
+		if !host.Blocked {
 			hostsMap[host.PublicKey] = host
 		}
 	}
