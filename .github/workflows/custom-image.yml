@@ -47,7 +47,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: MarviBiene/web
-          ref: main
+          # Test this backend with its matching UI branch; production builds use main.
+          ref: ${{ github.event_name == 'pull_request' && 'feature/indexd-host-status-ui-20261106' || 'main' }}
           path: web
 
       - name: Setup Node
