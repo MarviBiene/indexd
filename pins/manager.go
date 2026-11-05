@@ -42,6 +42,7 @@ type (
 		mu       sync.Mutex
 		rates    []decimal.Decimal
 		average  decimal.Decimal
+		lastApplied decimal.Decimal // average exchange rate used by the stored limits
 		currency string
 	}
 
@@ -172,6 +173,9 @@ func (pm *PinManager) updatePrices(ctx context.Context, force bool, log *zap.Log
 	if err != nil {
 		return fmt.Errorf("failed to update host usability settings, %w", err)
 	}
+	pm.mu.Lock()
+	pm.lastApplied = pm.average
+	pm.mu.Unlock()
 	return nil
 }
 
@@ -186,6 +190,7 @@ func (pm *PinManager) addRate(currency string, rate float64) bool {
 	if pm.currency != currency {
 		pm.currency = currency
 		pm.rates = nil
+		pm.lastApplied = decimal.Zero
 	}
 
 	// add rate to list
@@ -203,9 +208,9 @@ func (pm *PinManager) addRate(currency string, rate float64) bool {
 	avg := sum.Div(decimal.NewFromInt(int64(len(pm.rates))))
 
 	// calculate whether we should update prices
-	threshold := pm.average.Mul(decimal.NewFromFloat(priceUpdateThreshold))
-	diff := pm.average.Sub(avg).Abs()
-	shouldUpdate := diff.GreaterThanOrEqual(threshold)
+	threshold := pm.lastApplied.Mul(decimal.NewFromFloat(priceUpdateThreshold))
+	diff := pm.lastApplied.Sub(avg).Abs()
+	shouldUpdate := pm.lastApplied.IsZero() || diff.GreaterThanOrEqual(threshold)
 
 	// update average
 	pm.average = avg
