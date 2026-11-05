@@ -2007,6 +2007,9 @@ func TestContractsStats(t *testing.T) {
 	expected := contracts.Stats{
 		Contracts:          4,                   // all but fcid5
 		BadContracts:       2,                   // fcid2, fcid3
+		QuarantineContracts: 2, // good contracts on test host with no usable scan
+		OtherBadContracts: 2, // independently bad contracts
+		QuarantineCapacity: 10000, // 2000 + 8000
 		Renewing:           1,                   // fcid4
 		LockedAllowance:    types.Siacoins(100), // 10 + 20 + 30 + 40
 		RemainingAllowance: types.Siacoins(53),  // 8 + 15 + 20 + 10
