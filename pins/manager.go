@@ -39,11 +39,11 @@ type (
 		updatePriceFrequency time.Duration
 		rateWindow           time.Duration
 
-		mu       sync.Mutex
-		rates    []decimal.Decimal
-		average  decimal.Decimal
+		mu          sync.Mutex
+		rates       []decimal.Decimal
+		average     decimal.Decimal
 		lastApplied decimal.Decimal // average exchange rate used by the stored limits
-		currency string
+		currency    string
 	}
 
 	// Explorer retrieves data about the Sia network from an external source.
