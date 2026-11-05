@@ -201,7 +201,7 @@ WITH `+sqlGlobalsCTE+`, hosts AS (
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 	WHERE hosts.public_key = $1
 ) SELECT
-	hosts.*,`+sqlUsabilityCheckColumns+`
+	hosts.*,`+sqlUsabilityCheckColumns+`, EXISTS (SELECT 1 FROM contracts c WHERE c.host_id = hosts.id AND c.state IN (0,1) AND c.renewed_to IS NULL AND c.proof_height > globals.scanned_height) AS active_contract`+`
 FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("host %q: %w", hk, hosts.ErrNotFound)
@@ -264,7 +264,7 @@ WITH `+sqlGlobalsCTE+`, hosts AS (
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 ) SELECT
- 	hosts.*,`+sqlUsabilityCheckColumns+`
+ 	hosts.*,`+sqlUsabilityCheckColumns+`, EXISTS (SELECT 1 FROM contracts c WHERE c.host_id = hosts.id AND c.state IN (0,1) AND c.renewed_to IS NULL AND c.proof_height > globals.scanned_height) AS active_contract`+`
 FROM hosts CROSS JOIN globals
 WHERE
 	-- usable host filter
@@ -989,6 +989,7 @@ func scanHost(s scanner) (dbHost, error) {
 		&host.Usability.IngressPrice,
 		&host.Usability.EgressPrice,
 		&host.Usability.FreeSectorPrice,
+		&host.ActiveContract,
 	); err != nil {
 		return dbHost{}, err
 	}
@@ -1008,6 +1009,7 @@ func scanHost(s scanner) (dbHost, error) {
 		host.Settings.Prices.ValidUntil = validUntil.Time
 	}
 
+	host.Lifecycle = host.LifecycleStatus()
 	return host, nil
 }
 
