@@ -87,7 +87,6 @@ func (s *Store) ContractsStats() (resp contracts.Stats, _ error) {
 			return err
 		}
 
-
 		// Contract lifecycle is a combination of its own good/bad state and
 		// the host's current status. Transient host usability is not a
 		// permanent ban and must be counted independently.
