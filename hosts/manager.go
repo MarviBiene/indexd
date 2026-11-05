@@ -685,7 +685,7 @@ loop:
 }
 
 // unblockUsableHosts unblocks hosts that were blocked for failing usability
-// checks but that are usable again and no longer have any active contracts.
+// checks but that are usable again, including hosts with paid active contracts.
 // Only reasons that correspond to usability checks are removed; any other
 // blocklist reasons are left intact.
 func (m *HostManager) unblockUsableHosts(ctx context.Context) (int, error) {
@@ -697,8 +697,7 @@ func (m *HostManager) unblockUsableHosts(ctx context.Context) (int, error) {
 		}
 		hosts, err := m.store.Hosts(offset, batchSize,
 			WithBlocked(true),
-			WithUsable(true),
-			WithActiveContracts(false))
+			WithUsable(true))
 		if err != nil {
 			return 0, fmt.Errorf("failed to fetch hosts to unblock: %w", err)
 		}
