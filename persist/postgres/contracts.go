@@ -120,14 +120,18 @@ health AS (
 )
 SELECT
 	COUNT(*) FILTER (WHERE c.good AND health.usable AND NOT health.blocked),
-	COUNT(*) FILTER (WHERE NOT health.permanent_ban AND (health.blocked OR NOT health.usable)),
+	COUNT(*) FILTER (WHERE NOT health.permanent_ban AND (health.blocked OR NOT health.usable)
+		AND (c.good OR COALESCE(cbm.bad_reason, '') LIKE 'host blocked: %')),
 	COUNT(*) FILTER (WHERE health.permanent_ban),
-	COUNT(*) FILTER (WHERE NOT c.good AND NOT health.blocked AND health.usable),
+	COUNT(*) FILTER (WHERE NOT health.permanent_ban AND NOT c.good
+		AND NOT ((health.blocked OR NOT health.usable) AND COALESCE(cbm.bad_reason, '') LIKE 'host blocked: %')),
 	COALESCE(SUM(c.capacity) FILTER (WHERE c.good AND health.usable AND NOT health.blocked), 0),
-	COALESCE(SUM(c.capacity) FILTER (WHERE NOT health.permanent_ban AND (health.blocked OR NOT health.usable)), 0),
+	COALESCE(SUM(c.capacity) FILTER (WHERE NOT health.permanent_ban AND (health.blocked OR NOT health.usable)
+		AND (c.good OR COALESCE(cbm.bad_reason, '') LIKE 'host blocked: %')), 0),
 	COALESCE(SUM(c.capacity) FILTER (WHERE health.permanent_ban), 0)
 FROM contracts c
 JOIN health ON health.id = c.host_id
+LEFT JOIN custom_contract_bad_metadata cbm ON cbm.contract_id = c.contract_id
 CROSS JOIN globals
 WHERE c.state IN (0,1) AND c.renewed_to IS NULL
 	AND c.proof_height > globals.scanned_height
