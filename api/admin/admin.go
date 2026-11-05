@@ -1190,7 +1190,7 @@ func (a *admin) handlePUTHostsBlocklist(jc jape.Context) {
 	if jc.Decode(&hosts) != nil {
 		return
 	}
-	if jc.Check("failed to add host keys to blocklist", a.hosts.BlockHosts(jc.Request.Context(), hosts.HostKeys, hosts.Reasons)) != nil {
+	if jc.Check("failed to add host keys to blocklist", a.hosts.BlockHosts(jc.Request.Context(), hosts.HostKeys, append(hosts.Reasons, "ManualBan"))) != nil {
 		return
 	}
 	jc.Encode(nil)
