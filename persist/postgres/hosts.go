@@ -473,6 +473,9 @@ WITH restored AS (
 		AND h.public_key = $1
 		AND cbm.contract_id = c.contract_id
 		AND cbm.bad_reason LIKE $2
+        AND c.state IN (0, 1)
+        AND c.renewed_to IS NULL
+        AND c.proof_height > (SELECT scanned_height + contracts_renew_window / 2 FROM global_settings)
 	RETURNING c.contract_id
 )
 DELETE FROM custom_contract_bad_metadata
@@ -538,6 +541,9 @@ WITH restored AS (
 		AND h.public_key = ANY($1)
 		AND cbm.contract_id = c.contract_id
 		AND cbm.bad_reason LIKE $2
+        AND c.state IN (0, 1)
+        AND c.renewed_to IS NULL
+        AND c.proof_height > (SELECT scanned_height + contracts_renew_window / 2 FROM global_settings)
 	RETURNING c.contract_id
 )
 DELETE FROM custom_contract_bad_metadata
