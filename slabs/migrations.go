@@ -478,7 +478,11 @@ func sectorsToMigrate(slab Slab, state MigrationState) ([]int, []types.PublicKey
 		// Quarantined hosts remain valid sources of existing sectors. Avoid
 		// expensive migration for a temporary price or connectivity failure.
 		// New migration destinations remain gated by GoodForUpload below.
-		if !host.Blocked {
+		const maxQuarantineOutage = 72 * time.Hour
+		longOutage := host.ConsecutiveFailedScans >= 6 &&
+			!host.LastSuccessfulScan.IsZero() &&
+			time.Since(host.LastSuccessfulScan) > maxQuarantineOutage
+		if !host.IsPermanentBan() && !longOutage {
 			hostsMap[host.PublicKey] = host
 		}
 	}
