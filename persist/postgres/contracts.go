@@ -103,18 +103,29 @@ host_values AS (
 ),
 health AS (
 	SELECT h.id, hb.public_key IS NOT NULL AS blocked,
+		COALESCE(hb.public_key IS NOT NULL AND (
+			CARDINALITY(hb.reasons) = 0 OR EXISTS (
+				SELECT 1 FROM UNNEST(hb.reasons) AS reason
+				WHERE reason <> ALL(ARRAY[
+					'Uptime', 'MaxContractDuration', 'MaxCollateral',
+					'ProtocolVersion', 'PriceValidity', 'AcceptingContracts',
+					'QUIC', 'Siamux', 'ContractPrice', 'Collateral',
+					'StoragePrice', 'IngressPrice', 'EgressPrice', 'FreeSectorPrice'
+				]::text[])
+			)
+		), FALSE) AS permanent_ban,
 		(`+sqlUsabilityFilter+`) AS usable
 	FROM host_values h CROSS JOIN globals
 	LEFT JOIN hosts_blocklist hb ON hb.public_key = h.public_key
 )
 SELECT
 	COUNT(*) FILTER (WHERE c.good AND health.usable AND NOT health.blocked),
-	COUNT(*) FILTER (WHERE c.good AND NOT health.usable AND NOT health.blocked),
-	COUNT(*) FILTER (WHERE health.blocked),
-	COUNT(*) FILTER (WHERE NOT c.good AND NOT health.blocked),
+	COUNT(*) FILTER (WHERE NOT health.permanent_ban AND (health.blocked OR NOT health.usable)),
+	COUNT(*) FILTER (WHERE health.permanent_ban),
+	COUNT(*) FILTER (WHERE NOT c.good AND NOT health.blocked AND health.usable),
 	COALESCE(SUM(c.capacity) FILTER (WHERE c.good AND health.usable AND NOT health.blocked), 0),
-	COALESCE(SUM(c.capacity) FILTER (WHERE c.good AND NOT health.usable AND NOT health.blocked), 0),
-	COALESCE(SUM(c.capacity) FILTER (WHERE health.blocked), 0)
+	COALESCE(SUM(c.capacity) FILTER (WHERE NOT health.permanent_ban AND (health.blocked OR NOT health.usable)), 0),
+	COALESCE(SUM(c.capacity) FILTER (WHERE health.permanent_ban), 0)
 FROM contracts c
 JOIN health ON health.id = c.host_id
 CROSS JOIN globals
