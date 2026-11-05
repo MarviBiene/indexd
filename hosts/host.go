@@ -140,13 +140,36 @@ type (
 	}
 )
 
+// IsPermanentBan distinguishes explicit operator blocks from legacy automatic
+// usability blocklist entries. New manual blocks carry the ManualBan marker.
+// Unknown reasons are conservatively treated as permanent. Existing manually
+// entered reasons identical to usability names require one-time review.
+func (h Host) IsPermanentBan() bool {
+	if !h.Blocked {
+		return false
+	}
+	if len(h.BlockedReasons) == 0 {
+		return true
+	}
+	automatic := make(map[string]bool)
+	for _, reason := range (Usability{}).FailedChecks() {
+		automatic[reason] = true
+	}
+	for _, reason := range h.BlockedReasons {
+		if !automatic[reason] {
+			return true
+		}
+	}
+	return false
+}
+
 // LifecycleStatus distinguishes a temporary usability failure from an explicit
 // operator-controlled block. Neither changes the validity of existing data.
 func (h Host) LifecycleStatus() string {
-	if h.Blocked {
+	if h.IsPermanentBan() {
 		return "permanentBan"
 	}
-	if !h.Usability.Usable() {
+	if h.Blocked || !h.Usability.Usable() {
 		return "quarantine"
 	}
 	return "healthy"
