@@ -144,16 +144,16 @@ WHERE c.state IN (0,1) AND c.renewed_to IS NULL
 		}
 
 		resp = contracts.Stats{
-			Contracts:    numContracts,
-			BadContracts: numContracts - numGood,
-			HealthyContracts: healthyContracts,
-			QuarantineContracts: quarantineContracts,
+			Contracts:             numContracts,
+			BadContracts:          numContracts - numGood,
+			HealthyContracts:      healthyContracts,
+			QuarantineContracts:   quarantineContracts,
 			PermanentBanContracts: permanentBanContracts,
-			OtherBadContracts: otherBadContracts,
-			HealthyCapacity: healthyCapacity,
-			QuarantineCapacity: quarantineCapacity,
-			PermanentBanCapacity: permanentBanCapacity,
-			Renewing:     numRenewing,
+			OtherBadContracts:     otherBadContracts,
+			HealthyCapacity:       healthyCapacity,
+			QuarantineCapacity:    quarantineCapacity,
+			PermanentBanCapacity:  permanentBanCapacity,
+			Renewing:              numRenewing,
 
 			LockedAllowance:    lockedAllowance,
 			RemainingAllowance: remainingAllowance,
