@@ -266,14 +266,16 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			}
 			delete(hostsWithoutContracts, contract.HostKey) // host has at least one contract
 			if !host.Usability.Usable() {
-				// Keep it until its renewal window, without risking new writes
-				// or performing a refresh against a temporarily unusable host.
-				if contract.Good && contract.ProofHeight > height+settings.RenewWindow {
-					if host.PricePaused() {
-						pricePausedContracts[contract.HostKey] = struct{}{}
-					} else {
-						otherQuarantinedContracts[contract.HostKey] = struct{}{}
-					}
+				// Price-only pauses retain paid contracts until the safety
+				// migration deadline (half of the renew window), rather than
+				// forcing costly replacements at the start of that window.
+				// More serious host failures keep the conservative budget.
+				if contract.Good && host.PricePaused() &&
+					contract.ProofHeight > height+settings.RenewWindow/2 {
+					pricePausedContracts[contract.HostKey] = struct{}{}
+				} else if contract.Good &&
+					contract.ProofHeight > height+settings.RenewWindow {
+					otherQuarantinedContracts[contract.HostKey] = struct{}{}
 				}
 				continue
 			}
@@ -422,7 +424,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	}
 
 	// Price-paused, already paid contracts still count toward the configured
-	// target until their renewal window. Paying for replacements merely
+	// target until their safety migration deadline. Paying for replacements merely
 	// because a host's price temporarily rises creates unnecessary churn.
 	// Other availability failures retain the conservative 20% budget.
 	retainedOther := min(len(otherQuarantinedContracts), int(settings.WantedContracts)/5)
