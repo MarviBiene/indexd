@@ -165,6 +165,28 @@ func (h Host) IsPermanentBan() bool {
 	return false
 }
 
+// PricePaused reports a price-only quarantine. No new paid writes are allowed,
+// but already paid contract capacity is still retained until its retirement
+// window. It is deliberately false for unrelated host failures or manual bans.
+func (h Host) PricePaused() bool {
+	if h.Blocked {
+		return false
+	}
+	u := h.Usability
+	priceFailure := !u.PriceRecovery || !u.ContractPrice || !u.StoragePrice ||
+		!u.IngressPrice || !u.EgressPrice || !u.FreeSectorPrice
+	if !priceFailure {
+		return false
+	}
+	u.PriceRecovery = true
+	u.ContractPrice = true
+	u.StoragePrice = true
+	u.IngressPrice = true
+	u.EgressPrice = true
+	u.FreeSectorPrice = true
+	return u.Usable()
+}
+
 // LifecycleStatus distinguishes a temporary usability failure from an explicit
 // operator-controlled block. Neither changes the validity of existing data.
 func (h Host) LifecycleStatus() string {
