@@ -138,7 +138,7 @@ type (
 		TotalSpent             types.Currency      `json:"totalSpent"`
 		StuckSince             time.Time           `json:"stuckSince,omitempty"`
 		PriceQuarantineSince   time.Time           `json:"priceQuarantineSince,omitempty"`
-		PriceRecoveryScans    int16               `json:"priceRecoveryScans"`
+		PriceRecoveryScans     int16               `json:"priceRecoveryScans"`
 	}
 )
 
