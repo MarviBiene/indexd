@@ -100,7 +100,7 @@ const (
 	hosts.settings_storage_price > globals.hosts_max_storage_price OR
 	hosts.settings_ingress_price > globals.hosts_max_ingress_price OR
 	hosts.settings_egress_price > globals.hosts_max_egress_price OR
-	hosts.settings_free_sector_price > globals.one_sc / globals.sectors_per_tb`
+	hosts.settings_free_sector_price > 1E24::NUMERIC / 250000::NUMERIC`
 )
 
 type dbHost struct {
