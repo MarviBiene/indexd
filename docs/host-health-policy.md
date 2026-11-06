@@ -27,7 +27,7 @@ validated against a live indexd instance.
   contracts are not silently recovered.
 - Future manual bans contain `ManualBan` and are never automatically released.
 - **All paid price-only paused contracts count toward the wanted-contract
-  target** until their renewal window; temporary non-price outages keep the
+  target** until the safety migration deadline (half the renew window); temporary non-price outages keep the
   conservative 20% buffer. This minimizes double-payment, but may reduce
   available hosts for *new* uploads until prices return. Monitor the healthy
   (writable) host count and configure enough redundancy for the encoding scheme.
