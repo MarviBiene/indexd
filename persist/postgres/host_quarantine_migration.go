@@ -33,6 +33,22 @@ WHERE CARDINALITY(reasons) > 0
 	}
 	releasedHosts := res.RowsAffected()
 
+	// Some very old databases (including the v1 migration fixture) have no
+	// custom bad-reason metadata. In that case there is no safe way to infer
+	// which contracts were disabled solely by an automatic usability block.
+	// Release the legacy blocklist entries, but do not guess contract state.
+	var hasBadReasonMetadata bool
+	if err := tx.QueryRow(ctx,
+		"SELECT to_regclass('public.custom_contract_bad_metadata') IS NOT NULL",
+	).Scan(&hasBadReasonMetadata); err != nil {
+		return fmt.Errorf("failed to check legacy contract metadata schema: %w", err)
+	}
+	if !hasBadReasonMetadata {
+		log.Info("released legacy usability blocks; contract reason metadata unavailable",
+			zap.Int64("hosts", releasedHosts))
+		return nil
+	}
+
 	res, err = tx.Exec(ctx, `
 WITH restored AS (
 	UPDATE contracts AS c SET good = TRUE
