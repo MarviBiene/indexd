@@ -455,6 +455,4 @@ SET price_quarantine_since = NOW(), price_recovery_scans = 0
 FROM global_settings AS globals
 WHERE hosts.last_successful_scan IS NOT NULL AND (`+sqlHostOverPrice+`)`)
 		return err
-	},
-
-}
+	}}
