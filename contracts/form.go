@@ -252,7 +252,8 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	// currently have a contract that is both good for uploading and
 	// funding and determine the best candidate for refreshing.
 	usableHostContracts := make(map[types.PublicKey]candidateContract)
-	quarantinedHostContracts := make(map[types.PublicKey]struct{})
+	pricePausedContracts := make(map[types.PublicKey]struct{})
+	otherQuarantinedContracts := make(map[types.PublicKey]struct{})
 	for offset := 0; ; offset += batchSize {
 		batch, err := cm.store.Contracts(offset, batchSize, WithRevisable(true))
 		if err != nil {
@@ -268,7 +269,11 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 				// Keep it until its renewal window, without risking new writes
 				// or performing a refresh against a temporarily unusable host.
 				if contract.Good && contract.ProofHeight > height+settings.RenewWindow {
-					quarantinedHostContracts[contract.HostKey] = struct{}{}
+					if host.PricePaused() {
+						pricePausedContracts[contract.HostKey] = struct{}{}
+					} else {
+						otherQuarantinedContracts[contract.HostKey] = struct{}{}
+					}
 				}
 				continue
 			}
@@ -416,11 +421,17 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		}
 	}
 
-	// Reserve at most 20% of the target for temporarily quarantined paid
-	// contracts. This prevents churn while keeping an 80% healthy floor.
-	retainedQuarantined := min(len(quarantinedHostContracts), int(settings.WantedContracts)/5)
-	effectiveGoodContracts := goodContracts + retainedQuarantined
-	log.Debug("quarantine budget", zap.Int("healthy", goodContracts), zap.Int("quarantined", len(quarantinedHostContracts)), zap.Int("retained", retainedQuarantined))
+	// Price-paused, already paid contracts still count toward the configured
+	// target until their renewal window. Paying for replacements merely
+	// because a host's price temporarily rises creates unnecessary churn.
+	// Other availability failures retain the conservative 20% budget.
+	retainedOther := min(len(otherQuarantinedContracts), int(settings.WantedContracts)/5)
+	effectiveGoodContracts := goodContracts + len(pricePausedContracts) + retainedOther
+	log.Debug("quarantine budget",
+		zap.Int("healthy", goodContracts),
+		zap.Int("pricePaused", len(pricePausedContracts)),
+		zap.Int("otherQuarantined", len(otherQuarantinedContracts)),
+		zap.Int("retainedOther", retainedOther))
 	// form additional contracts if we are still below the target and have candidates
 	if effectiveGoodContracts < int(settings.WantedContracts) && len(hostsWithoutContracts) > 0 {
 		log.Debug("forming additional contracts to reach contract target", zap.Int("goodContracts", goodContracts), zap.Uint64("wanted", settings.WantedContracts), zap.Int("candidates", len(hostsWithoutContracts)))
