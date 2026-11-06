@@ -89,5 +89,16 @@ func setMaintenanceSettings(ctx context.Context, tx *txn, settings contracts.Mai
 func setUsabilitySettings(ctx context.Context, tx *txn, settings hosts.UsabilitySettings) error {
 	query := `UPDATE global_settings SET hosts_max_egress_price = $1, hosts_max_ingress_price = $2, hosts_max_storage_price = $3, hosts_min_collateral = $4, hosts_min_protocol_version = $5`
 	_, err := tx.Exec(ctx, query, sqlCurrency(settings.MaxEgressPrice), sqlCurrency(settings.MaxIngressPrice), sqlCurrency(settings.MaxStoragePrice), sqlCurrency(settings.MinCollateral), sqlProtocolVersion(settings.MinProtocolVersion))
+	if err != nil {
+		return err
+	}
+	// A tightening of USD/SC limits must pause expensive writes immediately,
+	// even when the next full host scan has not yet run.
+	_, err = tx.Exec(ctx, `
+UPDATE hosts
+SET price_quarantine_since = COALESCE(price_quarantine_since, NOW()),
+	price_recovery_scans = 0
+FROM global_settings AS globals
+WHERE hosts.last_successful_scan IS NOT NULL AND (`+sqlHostOverPrice+`)`)
 	return err
 }
