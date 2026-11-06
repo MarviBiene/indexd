@@ -25,10 +25,9 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 
 	blockHeight := cm.chain.TipState().Index.Height
 
-	// block bad hosts we have contracts with
-	if err := cm.blockBadHosts(ctx); err != nil {
-		return fmt.Errorf("failed to block bad hosts: %w", err)
-	}
+	// Transient usability failures (price spikes, availability, protocol negotiation)
+	// quarantine a host via eligibility checks, but must not invalidate paid contracts.
+	// Only explicit operator decisions permanently block hosts.
 
 	// renew any good contracts within their renew window
 	if err := cm.performContractRenewals(ctx, settings.Period, settings.RenewWindow, log.Named("renew")); err != nil {

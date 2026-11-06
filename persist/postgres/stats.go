@@ -475,6 +475,7 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 						hb.public_key IS NOT NULL AS blocked,
 						COALESCE(hb.reasons, ARRAY[]::TEXT[]) AS blocked_reasons,
 						h.stuck_since,
+						h.price_quarantine_since,
 						h.settings_remaining_storage,
 						h.last_successful_scan IS NOT NULL AS has_settings,
 						(get_byte(h.settings_protocol_version, 0) << 16) + (get_byte(h.settings_protocol_version, 1) << 8) + (get_byte(h.settings_protocol_version, 2)) AS settings_version,

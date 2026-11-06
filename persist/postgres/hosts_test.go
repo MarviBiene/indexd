@@ -594,6 +594,13 @@ func TestHostChecks(t *testing.T) {
 	_ = db.UpdateHostScan(hk, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("FreeSectorPrice")
 
+	// Recovery from an earlier price spike requires two successful scans;
+	// a corrected quote must not immediately resume new paid writes.
+	if err := db.UpdateHostScan(hk, hs, geoip.Location{}, true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	assertCheckOK("PriceRecovery")
+
 	// assert host is usable
 	if h, err := db.Host(hk); err != nil {
 		t.Fatal(err)
@@ -642,6 +649,7 @@ func TestHosts(t *testing.T) {
 		MaxCollateral:       true,
 		ProtocolVersion:     true,
 		PriceValidity:       true,
+		PriceRecovery:       true,
 		AcceptingContracts:  true,
 
 		QUIC:   true,

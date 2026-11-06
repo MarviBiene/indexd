@@ -75,6 +75,8 @@ CREATE TABLE hosts (
     lost_sectors INTEGER NOT NULL DEFAULT 0,
     unpinned_sectors INTEGER NOT NULL DEFAULT 0 CHECK (unpinned_sectors >= 0),
     stuck_since TIMESTAMP WITH TIME ZONE,
+    price_quarantine_since TIMESTAMP WITH TIME ZONE,
+    price_recovery_scans SMALLINT NOT NULL DEFAULT 0 CHECK (price_recovery_scans >= 0),
 
     scans INTEGER NOT NULL DEFAULT 0 CHECK (scans >= 0),
     scans_failed INTEGER NOT NULL DEFAULT 0 CHECK (scans_failed >= 0),

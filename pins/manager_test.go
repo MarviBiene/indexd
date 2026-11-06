@@ -175,8 +175,10 @@ func TestUpdatePricesThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// update right under threshold
-	e.updateRate(1.09)
+	// A 1% change must not trigger a 2% pinned-price update.
+	// Previously a 9% change was tolerated because each individual
+	// rolling-average step remained below 2%; that was the drift bug.
+	e.updateRate(1.01)
 	time.Sleep(time.Second)
 
 	// check the settings have not changed

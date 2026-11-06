@@ -285,7 +285,9 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 
 func TestAuthConnectRateLimit(t *testing.T) {
 	s := &mockAccounts{tokens: make(map[types.PublicKey]struct{})}
-	rl := api.NewIPRateLimiter(10*time.Millisecond, 2, time.Minute)
+	// The burst test must not refill between sequential loopback HTTP requests.
+	// A 10 ms refill interval made it fail nondeterministically on busy CI workers.
+	rl := api.NewIPRateLimiter(time.Minute, 2, 2*time.Minute)
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

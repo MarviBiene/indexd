@@ -98,8 +98,11 @@ func (m *SlabManager) fetchMigrationState() (state MigrationState, err error) {
 	state.MinHostDistanceKm = m.minHostDistanceKm
 	const batchSize = 500
 	for offset := 0; ; offset += batchSize {
+		// Include legacy automatically blocked hosts with an active contract.
+		// Distinguish them from permanent/manual bans when deciding which
+		// existing sectors to preserve. New upload destinations are still
+		// subject to strict GoodForUpload checks.
 		batch, err := m.store.Hosts(offset, batchSize,
-			hosts.WithBlocked(false),
 			hosts.WithActiveContracts(true))
 		if err != nil {
 			return state, fmt.Errorf("failed to fetch hosts: %w", err)
@@ -475,7 +478,14 @@ func sectorsToMigrate(slab Slab, state MigrationState) ([]int, []types.PublicKey
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range state.Hosts {
-		if host.IsGood() {
+		// Quarantined hosts remain valid sources of existing sectors. Avoid
+		// expensive migration for a temporary price or connectivity failure.
+		// New migration destinations remain gated by GoodForUpload below.
+		const maxQuarantineOutage = 72 * time.Hour
+		longOutage := host.ConsecutiveFailedScans >= 6 &&
+			!host.LastSuccessfulScan.IsZero() &&
+			time.Since(host.LastSuccessfulScan) > maxQuarantineOutage
+		if !host.IsPermanentBan() && !longOutage {
 			hostsMap[host.PublicKey] = host
 		}
 	}

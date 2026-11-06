@@ -140,19 +140,29 @@ func TestMigrationBatchAPI(t *testing.T) {
 		t.Fatal("expected at least one upload candidate")
 	}
 
-	// the state's hosts must carry addresses for every candidate, and the
-	// blocked host must be absent so it is neither read from nor uploaded to
+	// The state includes blocked hosts for read-only retention decisions.
+	// Explicitly banned hosts must never become upload destinations, however.
 	addrs := make(map[types.PublicKey]int)
+	var blockedHostFound bool
 	for _, h := range batch.State.Hosts {
 		addrs[h.PublicKey] = len(h.Addresses)
+		if h.PublicKey == blocked {
+			blockedHostFound = true
+			if !h.IsPermanentBan() {
+				t.Fatal("manually blocked host must be classified as a permanent ban")
+			}
+		}
+	}
+	if !blockedHostFound {
+		t.Fatal("expected the blocked host in the migration state for classification")
 	}
 	for _, candidate := range candidates {
 		if addrs[candidate] == 0 {
 			t.Fatalf("expected addresses for upload candidate %s", candidate)
 		}
-	}
-	if _, ok := addrs[blocked]; ok {
-		t.Fatal("expected the blocked host to be absent from the migration state")
+		if candidate == blocked {
+			t.Fatal("permanently banned host must never be an upload candidate")
+		}
 	}
 }
 

@@ -129,14 +129,75 @@ type (
 		Settings               proto4.HostSettings `json:"settings"`
 		Usability              Usability           `json:"usability"`
 		Blocked                bool                `json:"blocked"`
+		ActiveContract         bool                `json:"activeContract"`
+		Lifecycle              string              `json:"lifecycle"`
 		BlockedReasons         []string            `json:"blockedReasons"`
 		LostSectors            uint64              `json:"lostSectors"`
 		UnpinnedSectors        uint64              `json:"unpinnedSectors"`
 		AccountFunding         types.Currency      `json:"accountFunding"`
 		TotalSpent             types.Currency      `json:"totalSpent"`
 		StuckSince             time.Time           `json:"stuckSince,omitempty"`
+		PriceQuarantineSince   time.Time           `json:"priceQuarantineSince,omitempty"`
+		PriceRecoveryScans     int16               `json:"priceRecoveryScans"`
 	}
 )
+
+// IsPermanentBan distinguishes explicit operator blocks from legacy automatic
+// usability blocklist entries. New manual blocks carry the ManualBan marker.
+// Unknown reasons are conservatively treated as permanent. Existing manually
+// entered reasons identical to usability names require one-time review.
+func (h Host) IsPermanentBan() bool {
+	if !h.Blocked {
+		return false
+	}
+	if len(h.BlockedReasons) == 0 {
+		return true
+	}
+	automatic := make(map[string]bool)
+	for _, reason := range (Usability{}).FailedChecks() {
+		automatic[reason] = true
+	}
+	for _, reason := range h.BlockedReasons {
+		if !automatic[reason] {
+			return true
+		}
+	}
+	return false
+}
+
+// PricePaused reports a price-only quarantine. No new paid writes are allowed,
+// but already paid contract capacity is still retained until its retirement
+// window. It is deliberately false for unrelated host failures or manual bans.
+func (h Host) PricePaused() bool {
+	if h.Blocked {
+		return false
+	}
+	u := h.Usability
+	priceFailure := !u.PriceRecovery || !u.ContractPrice || !u.StoragePrice ||
+		!u.IngressPrice || !u.EgressPrice || !u.FreeSectorPrice
+	if !priceFailure {
+		return false
+	}
+	u.PriceRecovery = true
+	u.ContractPrice = true
+	u.StoragePrice = true
+	u.IngressPrice = true
+	u.EgressPrice = true
+	u.FreeSectorPrice = true
+	return u.Usable()
+}
+
+// LifecycleStatus distinguishes a temporary usability failure from an explicit
+// operator-controlled block. Neither changes the validity of existing data.
+func (h Host) LifecycleStatus() string {
+	if h.IsPermanentBan() {
+		return "permanentBan"
+	}
+	if h.Blocked || !h.Usability.Usable() {
+		return "quarantine"
+	}
+	return "healthy"
+}
 
 // HasPoolSupport reports whether the host supports RHP4 balance pools.
 func (h Host) HasPoolSupport() bool {
@@ -172,6 +233,7 @@ type (
 		MaxCollateral       bool `json:"maxCollateral"`
 		ProtocolVersion     bool `json:"protocolVersion"`
 		PriceValidity       bool `json:"priceValidity"`
+		PriceRecovery       bool `json:"priceRecovery"`
 		AcceptingContracts  bool `json:"acceptingContracts"`
 
 		QUIC   bool `json:"quic"`
@@ -252,6 +314,7 @@ var GoodUsability = Usability{
 	MaxCollateral:       true,
 	ProtocolVersion:     true,
 	PriceValidity:       true,
+	PriceRecovery:       true,
 	AcceptingContracts:  true,
 
 	QUIC:   true,
@@ -284,6 +347,9 @@ func (u Usability) FailedChecks() []string {
 	}
 	if !u.ProtocolVersion {
 		reasons = append(reasons, "ProtocolVersion")
+	}
+	if !u.PriceRecovery {
+		reasons = append(reasons, "PriceRecovery")
 	}
 	if !u.PriceValidity {
 		reasons = append(reasons, "PriceValidity")

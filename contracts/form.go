@@ -228,17 +228,20 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	const batchSize = 100
 
 	log.Debug("started", zap.Uint64("period", settings.Period), zap.Int64("wanted", int64(settings.WantedContracts)))
-	// fetch all hosts that are usable and not blocked
+	// Fetch all non-permanently-blocked hosts. Keep quarantined hosts in view
+	// so their paid, existing contracts are not immediately replaced.
 	hostMap := make(map[types.PublicKey]hosts.Host)
 	hostsWithoutContracts := make(map[types.PublicKey]hosts.Host)
 	for offset := 0; ; offset += batchSize {
-		batch, err := cm.hosts.Hosts(ctx, offset, batchSize, hosts.WithUsable(true), hosts.WithBlocked(false))
+		batch, err := cm.hosts.Hosts(ctx, offset, batchSize, hosts.WithBlocked(false))
 		if err != nil {
 			return fmt.Errorf("failed to fetch hosts to form contracts with: %w", err)
 		}
 		for _, h := range batch {
 			hostMap[h.PublicKey] = h
-			hostsWithoutContracts[h.PublicKey] = h
+			if h.Usability.Usable() {
+				hostsWithoutContracts[h.PublicKey] = h
+			}
 		}
 		if len(batch) < batchSize {
 			break
@@ -249,6 +252,8 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	// currently have a contract that is both good for uploading and
 	// funding and determine the best candidate for refreshing.
 	usableHostContracts := make(map[types.PublicKey]candidateContract)
+	pricePausedContracts := make(map[types.PublicKey]struct{})
+	otherQuarantinedContracts := make(map[types.PublicKey]struct{})
 	for offset := 0; ; offset += batchSize {
 		batch, err := cm.store.Contracts(offset, batchSize, WithRevisable(true))
 		if err != nil {
@@ -260,6 +265,20 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 				continue // host is not usable or is blocked
 			}
 			delete(hostsWithoutContracts, contract.HostKey) // host has at least one contract
+			if !host.Usability.Usable() {
+				// Price-only pauses retain paid contracts until the safety
+				// migration deadline (half of the renew window), rather than
+				// forcing costly replacements at the start of that window.
+				// More serious host failures keep the conservative budget.
+				if contract.Good && host.PricePaused() &&
+					contract.ProofHeight > height+settings.RenewWindow/2 {
+					pricePausedContracts[contract.HostKey] = struct{}{}
+				} else if contract.Good &&
+					contract.ProofHeight > height+settings.RenewWindow {
+					otherQuarantinedContracts[contract.HostKey] = struct{}{}
+				}
+				continue
+			}
 
 			accountFundTarget, err := cm.ContractFundTarget(ctx, host, minAllowance)
 			if err != nil {
@@ -404,8 +423,19 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		}
 	}
 
+	// Price-paused, already paid contracts still count toward the configured
+	// target until their safety migration deadline. Paying for replacements merely
+	// because a host's price temporarily rises creates unnecessary churn.
+	// Other availability failures retain the conservative 20% budget.
+	retainedOther := min(len(otherQuarantinedContracts), int(settings.WantedContracts)/5)
+	effectiveGoodContracts := contractTargetCount(goodContracts, len(pricePausedContracts), len(otherQuarantinedContracts), settings.WantedContracts)
+	log.Debug("quarantine budget",
+		zap.Int("healthy", goodContracts),
+		zap.Int("pricePaused", len(pricePausedContracts)),
+		zap.Int("otherQuarantined", len(otherQuarantinedContracts)),
+		zap.Int("retainedOther", retainedOther))
 	// form additional contracts if we are still below the target and have candidates
-	if goodContracts < int(settings.WantedContracts) && len(hostsWithoutContracts) > 0 {
+	if effectiveGoodContracts < int(settings.WantedContracts) && len(hostsWithoutContracts) > 0 {
 		log.Debug("forming additional contracts to reach contract target", zap.Int("goodContracts", goodContracts), zap.Uint64("wanted", settings.WantedContracts), zap.Int("candidates", len(hostsWithoutContracts)))
 		usabilitySettings, err := cm.hosts.UsabilitySettings(ctx)
 		if err != nil {
@@ -418,7 +448,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		for _, cc := range usableHostContracts {
 			set.Add(cc.host)
 		}
-		additional := int(settings.WantedContracts) - goodContracts
+		additional := int(settings.WantedContracts) - effectiveGoodContracts
 		for _, host := range hostsWithoutContracts {
 			if additional <= 0 {
 				break
@@ -497,6 +527,13 @@ func contractFunding(settings proto.HostSettings, existingData uint64, minAllowa
 // as possible for both uploading and funding. A contract that can be refreshed
 // is preferred over one that cannot to prevent forming unnecessary extra
 // contracts.
+// contractTargetCount keeps all paid price-only paused contracts until their
+// renewal window, but conservatively limits unrelated availability quarantines
+// to 20% of the target. The caller excludes expired, renewed and bad contracts.
+func contractTargetCount(healthy, pricePaused, otherQuarantined int, wanted uint64) int {
+	return healthy + pricePaused + min(otherQuarantined, int(wanted)/5)
+}
+
 func shouldReplaceContract(current, candidate candidateContract) bool {
 	switch {
 	case current.goodForAppend == nil && current.goodForFunding == nil:

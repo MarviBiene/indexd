@@ -435,4 +435,25 @@ ALTER TABLE global_settings ADD COLUMN object_events_last_published TIMESTAMP WI
 UPDATE global_settings SET object_events_last_published = COALESCE((SELECT date_trunc('second', MAX(updated_at)) FROM object_events), '-infinity');`)
 		return err
 	},
+	// Preserve paid contracts when a host temporarily quotes excessive prices.
+	// Existing price-only blocks are reconciled exactly once on upgrade.
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		if _, err := tx.Exec(ctx, `
+ALTER TABLE hosts
+	ADD COLUMN price_quarantine_since TIMESTAMP WITH TIME ZONE,
+	ADD COLUMN price_recovery_scans SMALLINT NOT NULL DEFAULT 0 CHECK (price_recovery_scans >= 0)`); err != nil {
+			return fmt.Errorf("failed to create price quarantine fields: %w", err)
+		}
+		if err := restoreLegacyUsabilityBlocks(ctx, tx, log); err != nil {
+			return err
+		}
+		// Initial states are based on cached host prices. Recovered hosts
+		// require two successful scans before becoming writable again.
+		_, err := tx.Exec(ctx, `
+UPDATE hosts
+SET price_quarantine_since = NOW(), price_recovery_scans = 0
+FROM global_settings AS globals
+WHERE hosts.last_successful_scan IS NOT NULL AND (`+sqlHostOverPrice+`)`)
+		return err
+	},
 }

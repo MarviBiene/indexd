@@ -952,7 +952,11 @@ func (a *admin) handleGETContract(jc jape.Context) {
 		return
 	}
 
-	jc.Encode(contract)
+	decorated, err := a.decorateContractLifecycle(jc.Request.Context(), []contracts.Contract{contract})
+	if jc.Check("failed to get host lifecycle", err) != nil {
+		return
+	}
+	jc.Encode(decorated[0])
 }
 
 func (a *admin) handleDELETEContract(jc jape.Context) {
@@ -1040,7 +1044,11 @@ func (a *admin) handleGETContracts(jc jape.Context) {
 	} else if jc.Check("failed to get contracts", err) != nil {
 		return
 	}
-	jc.Encode(res)
+	decorated, err := a.decorateContractLifecycle(jc.Request.Context(), res)
+	if jc.Check("failed to get host lifecycles", err) != nil {
+		return
+	}
+	jc.Encode(decorated)
 }
 
 func (a *admin) handleGETHost(jc jape.Context) {
@@ -1190,7 +1198,7 @@ func (a *admin) handlePUTHostsBlocklist(jc jape.Context) {
 	if jc.Decode(&hosts) != nil {
 		return
 	}
-	if jc.Check("failed to add host keys to blocklist", a.hosts.BlockHosts(jc.Request.Context(), hosts.HostKeys, hosts.Reasons)) != nil {
+	if jc.Check("failed to add host keys to blocklist", a.hosts.BlockHosts(jc.Request.Context(), hosts.HostKeys, append(hosts.Reasons, "ManualBan"))) != nil {
 		return
 	}
 	jc.Encode(nil)

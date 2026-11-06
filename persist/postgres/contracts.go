@@ -87,10 +87,73 @@ func (s *Store) ContractsStats() (resp contracts.Stats, _ error) {
 			return err
 		}
 
+		// Contract lifecycle is a combination of its own good/bad state and
+		// the host's current status. Transient host usability is not a
+		// permanent ban and must be counted independently.
+		var healthyContracts, quarantineContracts, permanentBanContracts, otherBadContracts uint64
+		var healthyCapacity, quarantineCapacity, permanentBanCapacity uint64
+		err = tx.QueryRow(ctx, `
+WITH `+sqlGlobalsCTE+`,
+host_values AS (
+	SELECT h.*, h.last_successful_scan IS NOT NULL AS has_settings,
+		(get_byte(h.settings_protocol_version, 0) << 16) +
+		(get_byte(h.settings_protocol_version, 1) << 8) +
+		get_byte(h.settings_protocol_version, 2) AS settings_version
+	FROM hosts h
+),
+health AS (
+	SELECT h.id, hb.public_key IS NOT NULL AS blocked,
+		COALESCE(hb.public_key IS NOT NULL AND (
+			CARDINALITY(hb.reasons) = 0 OR EXISTS (
+				SELECT 1 FROM UNNEST(hb.reasons) AS reason
+				WHERE reason <> ALL(ARRAY[
+					'Uptime', 'MaxContractDuration', 'MaxCollateral',
+					'ProtocolVersion', 'PriceValidity', 'AcceptingContracts',
+					'QUIC', 'Siamux', 'ContractPrice', 'Collateral',
+					'StoragePrice', 'IngressPrice', 'EgressPrice', 'FreeSectorPrice'
+				]::text[])
+			)
+		), FALSE) AS permanent_ban,
+		(`+sqlUsabilityFilter+`) AS usable
+	FROM host_values h CROSS JOIN globals
+	LEFT JOIN hosts_blocklist hb ON hb.public_key = h.public_key
+)
+SELECT
+	COUNT(*) FILTER (WHERE c.good AND health.usable AND NOT health.blocked),
+	COUNT(*) FILTER (WHERE NOT health.permanent_ban AND (health.blocked OR NOT health.usable)
+		AND (c.good OR COALESCE(cbm.bad_reason, '') LIKE 'host blocked: %')),
+	COUNT(*) FILTER (WHERE health.permanent_ban),
+	COUNT(*) FILTER (WHERE NOT health.permanent_ban AND NOT c.good
+		AND NOT ((health.blocked OR NOT health.usable) AND COALESCE(cbm.bad_reason, '') LIKE 'host blocked: %')),
+	COALESCE(SUM(c.capacity) FILTER (WHERE c.good AND health.usable AND NOT health.blocked), 0),
+	COALESCE(SUM(c.capacity) FILTER (WHERE NOT health.permanent_ban AND (health.blocked OR NOT health.usable)
+		AND (c.good OR COALESCE(cbm.bad_reason, '') LIKE 'host blocked: %')), 0),
+	COALESCE(SUM(c.capacity) FILTER (WHERE health.permanent_ban), 0)
+FROM contracts c
+JOIN health ON health.id = c.host_id
+LEFT JOIN custom_contract_bad_metadata cbm ON cbm.contract_id = c.contract_id
+CROSS JOIN globals
+WHERE c.state IN (0,1) AND c.renewed_to IS NULL
+	AND c.proof_height > globals.scanned_height
+`).Scan(
+			&healthyContracts, &quarantineContracts, &permanentBanContracts,
+			&otherBadContracts, &healthyCapacity, &quarantineCapacity, &permanentBanCapacity,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to query contract health statistics: %w", err)
+		}
+
 		resp = contracts.Stats{
-			Contracts:    numContracts,
-			BadContracts: numContracts - numGood,
-			Renewing:     numRenewing,
+			Contracts:             numContracts,
+			BadContracts:          numContracts - numGood,
+			HealthyContracts:      healthyContracts,
+			QuarantineContracts:   quarantineContracts,
+			PermanentBanContracts: permanentBanContracts,
+			OtherBadContracts:     otherBadContracts,
+			HealthyCapacity:       healthyCapacity,
+			QuarantineCapacity:    quarantineCapacity,
+			PermanentBanCapacity:  permanentBanCapacity,
+			Renewing:              numRenewing,
 
 			LockedAllowance:    lockedAllowance,
 			RemainingAllowance: remainingAllowance,

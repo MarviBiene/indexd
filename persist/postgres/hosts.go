@@ -60,6 +60,7 @@ const (
 	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
 	has_settings AND settings_valid_until >= last_successful_scan + INTERVAL '15 minutes',
+	has_settings AND price_quarantine_since IS NULL,
 	has_settings AND settings_accepting_contracts,
 	has_quic,
 	has_siamux,
@@ -80,6 +81,7 @@ const (
 	settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
 	settings_version >= globals.host_min_version AND
 	settings_valid_until >= last_successful_scan + INTERVAL '15 minutes' AND
+	price_quarantine_since IS NULL AND
 	settings_accepting_contracts AND
 	has_quic AND
 	has_siamux AND
@@ -90,6 +92,15 @@ const (
 	settings_ingress_price <= globals.hosts_max_ingress_price AND
 	settings_egress_price <= globals.hosts_max_egress_price AND
 	settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb`
+
+	// sqlHostOverPrice is the common price predicate used to enter or hold
+	// a price-only quarantine. Contract validity remains independent of it.
+	sqlHostOverPrice = `
+	hosts.settings_contract_price > 1E24 OR
+	hosts.settings_storage_price > globals.hosts_max_storage_price OR
+	hosts.settings_ingress_price > globals.hosts_max_ingress_price OR
+	hosts.settings_egress_price > globals.hosts_max_egress_price OR
+	hosts.settings_free_sector_price > 1E24::NUMERIC / 250000::NUMERIC`
 )
 
 type dbHost struct {
@@ -196,12 +207,12 @@ WITH `+sqlGlobalsCTE+`, hosts AS (
 		last_successful_scan IS NOT NULL as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
 		has_quic, has_siamux,
-		stuck_since
+		stuck_since, price_quarantine_since, price_recovery_scans
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 	WHERE hosts.public_key = $1
 ) SELECT
-	hosts.*,`+sqlUsabilityCheckColumns+`
+	hosts.*,`+sqlUsabilityCheckColumns+`, EXISTS (SELECT 1 FROM contracts c WHERE c.host_id = hosts.id AND c.state IN (0,1) AND c.renewed_to IS NULL AND c.proof_height > globals.scanned_height) AS active_contract`+`
 FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("host %q: %w", hk, hosts.ErrNotFound)
@@ -260,11 +271,11 @@ WITH `+sqlGlobalsCTE+`, hosts AS (
 		last_successful_scan IS NOT NULL as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
 		has_quic, has_siamux,
-		stuck_since
+		stuck_since, price_quarantine_since, price_recovery_scans
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 ) SELECT
- 	hosts.*,`+sqlUsabilityCheckColumns+`
+ 	hosts.*,`+sqlUsabilityCheckColumns+`, EXISTS (SELECT 1 FROM contracts c WHERE c.host_id = hosts.id AND c.state IN (0,1) AND c.renewed_to IS NULL AND c.proof_height > globals.scanned_height) AS active_contract`+`
 FROM hosts CROSS JOIN globals
 WHERE
 	-- usable host filter
@@ -473,6 +484,9 @@ WITH restored AS (
 		AND h.public_key = $1
 		AND cbm.contract_id = c.contract_id
 		AND cbm.bad_reason LIKE $2
+        AND c.state IN (0, 1)
+        AND c.renewed_to IS NULL
+        AND c.proof_height > (SELECT scanned_height FROM global_settings)
 	RETURNING c.contract_id
 )
 DELETE FROM custom_contract_bad_metadata
@@ -538,6 +552,9 @@ WITH restored AS (
 		AND h.public_key = ANY($1)
 		AND cbm.contract_id = c.contract_id
 		AND cbm.bad_reason LIKE $2
+        AND c.state IN (0, 1)
+        AND c.renewed_to IS NULL
+        AND c.proof_height > (SELECT scanned_height FROM global_settings)
 	RETURNING c.contract_id
 )
 DELETE FROM custom_contract_bad_metadata
@@ -636,6 +653,17 @@ WHERE public_key = $10 AND settings_valid_until < $8`
 			prices.ValidUntil,
 			sqlSignature(prices.Signature),
 			sqlPublicKey(hk))
+		if err != nil {
+			return err
+		}
+		// A valid price table obtained without a full scan may immediately
+		// trigger quarantine, but it cannot clear a quarantine by itself.
+		_, err = tx.Exec(ctx, `
+UPDATE hosts
+SET price_quarantine_since = COALESCE(price_quarantine_since, NOW()),
+	price_recovery_scans = 0
+FROM global_settings AS globals
+WHERE hosts.public_key = $1 AND (`+sqlHostOverPrice+`)`, sqlPublicKey(hk))
 		return err
 	})
 }
@@ -765,7 +793,27 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 			return fmt.Errorf("failed to update host with scan: %w", err)
 		} else if hostID == 0 {
 			return errors.New("failed to return host id after successful update") // sanity check
-		} else if err := incrementNumScans(ctx, tx, scanSucceeded); err != nil {
+		}
+		// A high price pauses only new work. Two consecutive successful
+		// scans with acceptable prices are required before resuming writes.
+		// Both CASE expressions intentionally use the previous row values.
+		_, err = tx.Exec(ctx, `
+UPDATE hosts
+SET
+	price_quarantine_since = CASE
+		WHEN (`+sqlHostOverPrice+`) THEN COALESCE(hosts.price_quarantine_since, NOW())
+		WHEN hosts.price_quarantine_since IS NOT NULL AND hosts.price_recovery_scans < 1 THEN hosts.price_quarantine_since
+		ELSE NULL END,
+	price_recovery_scans = CASE
+		WHEN (`+sqlHostOverPrice+`) THEN 0
+		WHEN hosts.price_quarantine_since IS NOT NULL AND hosts.price_recovery_scans < 1 THEN hosts.price_recovery_scans + 1
+		ELSE 0 END
+FROM global_settings AS globals
+WHERE hosts.id = $1`, hostID)
+		if err != nil {
+			return fmt.Errorf("failed to update host price quarantine: %w", err)
+		}
+		if err := incrementNumScans(ctx, tx, scanSucceeded); err != nil {
 			return fmt.Errorf("failed to update total scans: %w", err)
 		}
 
@@ -818,6 +866,7 @@ WITH ` + sqlGlobalsCTE + `, hosts AS (
 		settings_tip_height,
 		settings_valid_until,
 		settings_signature,
+		price_quarantine_since,
 		last_successful_scan IS NOT NULL AS has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
 		has_quic, has_siamux,
@@ -928,7 +977,7 @@ func decorateHostAddresses(ctx context.Context, tx *txn, dbHosts ...*dbHost) err
 func scanHost(s scanner) (dbHost, error) {
 	var host dbHost
 	var point pgtype.Point
-	var lastFailedScan, lastSuccessfulScan, stuckSince, validUntil sql.NullTime
+	var lastFailedScan, lastSuccessfulScan, stuckSince, validUntil, priceQuarantineSince sql.NullTime
 	var ignore any
 	if err := s.Scan(
 		&host.id,
@@ -969,11 +1018,14 @@ func scanHost(s scanner) (dbHost, error) {
 		&ignore, // has_quic
 		&ignore, // has_siamux
 		&stuckSince,
+		&priceQuarantineSince,
+		&host.PriceRecoveryScans,
 		&host.Usability.Uptime,
 		&host.Usability.MaxContractDuration,
 		&host.Usability.MaxCollateral,
 		&host.Usability.ProtocolVersion,
 		&host.Usability.PriceValidity,
+		&host.Usability.PriceRecovery,
 		&host.Usability.AcceptingContracts,
 		&host.Usability.QUIC,
 		&host.Usability.Siamux,
@@ -983,6 +1035,7 @@ func scanHost(s scanner) (dbHost, error) {
 		&host.Usability.IngressPrice,
 		&host.Usability.EgressPrice,
 		&host.Usability.FreeSectorPrice,
+		&host.ActiveContract,
 	); err != nil {
 		return dbHost{}, err
 	}
@@ -998,10 +1051,14 @@ func scanHost(s scanner) (dbHost, error) {
 	if stuckSince.Valid {
 		host.StuckSince = stuckSince.Time
 	}
+	if priceQuarantineSince.Valid {
+		host.PriceQuarantineSince = priceQuarantineSince.Time
+	}
 	if validUntil.Valid {
 		host.Settings.Prices.ValidUntil = validUntil.Time
 	}
 
+	host.Lifecycle = host.LifecycleStatus()
 	return host, nil
 }
 
