@@ -60,7 +60,7 @@ const (
 	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
 	has_settings AND settings_valid_until >= last_successful_scan + INTERVAL '15 minutes',
-	price_quarantine_since IS NULL,
+	has_settings AND price_quarantine_since IS NULL,
 	has_settings AND settings_accepting_contracts,
 	has_quic,
 	has_siamux,
