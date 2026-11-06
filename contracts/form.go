@@ -426,7 +426,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	// because a host's price temporarily rises creates unnecessary churn.
 	// Other availability failures retain the conservative 20% budget.
 	retainedOther := min(len(otherQuarantinedContracts), int(settings.WantedContracts)/5)
-	effectiveGoodContracts := goodContracts + len(pricePausedContracts) + retainedOther
+	effectiveGoodContracts := contractTargetCount(goodContracts, len(pricePausedContracts), len(otherQuarantinedContracts), settings.WantedContracts)
 	log.Debug("quarantine budget",
 		zap.Int("healthy", goodContracts),
 		zap.Int("pricePaused", len(pricePausedContracts)),
@@ -525,6 +525,13 @@ func contractFunding(settings proto.HostSettings, existingData uint64, minAllowa
 // as possible for both uploading and funding. A contract that can be refreshed
 // is preferred over one that cannot to prevent forming unnecessary extra
 // contracts.
+// contractTargetCount keeps all paid price-only paused contracts until their
+// renewal window, but conservatively limits unrelated availability quarantines
+// to 20% of the target. The caller excludes expired, renewed and bad contracts.
+func contractTargetCount(healthy, pricePaused, otherQuarantined int, wanted uint64) int {
+	return healthy + pricePaused + min(otherQuarantined, int(wanted)/5)
+}
+
 func shouldReplaceContract(current, candidate candidateContract) bool {
 	switch {
 	case current.goodForAppend == nil && current.goodForFunding == nil:
