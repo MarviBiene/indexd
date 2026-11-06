@@ -98,8 +98,11 @@ func (m *SlabManager) fetchMigrationState() (state MigrationState, err error) {
 	state.MinHostDistanceKm = m.minHostDistanceKm
 	const batchSize = 500
 	for offset := 0; ; offset += batchSize {
+		// Include legacy automatically blocked hosts with an active contract.
+		// Distinguish them from permanent/manual bans when deciding which
+		// existing sectors to preserve. New upload destinations are still
+		// subject to strict GoodForUpload checks.
 		batch, err := m.store.Hosts(offset, batchSize,
-			hosts.WithBlocked(false),
 			hosts.WithActiveContracts(true))
 		if err != nil {
 			return state, fmt.Errorf("failed to fetch hosts: %w", err)
