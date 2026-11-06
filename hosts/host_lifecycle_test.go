@@ -8,10 +8,21 @@ func TestLifecycleStatus(t *testing.T) {
 		t.Fatalf("healthy host: got %q", got)
 	}
 	h.Usability.IngressPrice = false
+	if !h.PricePaused() {
+		t.Fatal("isolated ingress-price failure should pause only new writes")
+	}
 	if got := h.LifecycleStatus(); got != "quarantine" {
 		t.Fatalf("price excursion: got %q", got)
 	}
+	h.Usability.Uptime = false
+	if h.PricePaused() {
+		t.Fatal("offline host is not a price-only quarantine")
+	}
+	h.Usability.Uptime = true
 	h.Blocked = true
+	if h.PricePaused() {
+		t.Fatal("blocked host must not count as price-only paused")
+	}
 	h.BlockedReasons = []string{"IngressPrice"}
 	if got := h.LifecycleStatus(); got != "quarantine" {
 		t.Fatalf("legacy automatic block: got %q", got)
