@@ -642,6 +642,7 @@ func TestHosts(t *testing.T) {
 		MaxCollateral:       true,
 		ProtocolVersion:     true,
 		PriceValidity:       true,
+		PriceRecovery:       true,
 		AcceptingContracts:  true,
 
 		QUIC:   true,
