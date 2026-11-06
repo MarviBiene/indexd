@@ -137,6 +137,8 @@ type (
 		AccountFunding         types.Currency      `json:"accountFunding"`
 		TotalSpent             types.Currency      `json:"totalSpent"`
 		StuckSince             time.Time           `json:"stuckSince,omitempty"`
+		PriceQuarantineSince   time.Time           `json:"priceQuarantineSince,omitempty"`
+		PriceRecoveryScans    int                 `json:"priceRecoveryScans"`
 	}
 )
 
@@ -209,6 +211,7 @@ type (
 		MaxCollateral       bool `json:"maxCollateral"`
 		ProtocolVersion     bool `json:"protocolVersion"`
 		PriceValidity       bool `json:"priceValidity"`
+		PriceRecovery       bool `json:"priceRecovery"`
 		AcceptingContracts  bool `json:"acceptingContracts"`
 
 		QUIC   bool `json:"quic"`
@@ -289,6 +292,7 @@ var GoodUsability = Usability{
 	MaxCollateral:       true,
 	ProtocolVersion:     true,
 	PriceValidity:       true,
+	PriceRecovery:       true,
 	AcceptingContracts:  true,
 
 	QUIC:   true,
@@ -321,6 +325,9 @@ func (u Usability) FailedChecks() []string {
 	}
 	if !u.ProtocolVersion {
 		reasons = append(reasons, "ProtocolVersion")
+	}
+	if !u.PriceRecovery {
+		reasons = append(reasons, "PriceRecovery")
 	}
 	if !u.PriceValidity {
 		reasons = append(reasons, "PriceValidity")
