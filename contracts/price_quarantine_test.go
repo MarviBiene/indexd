@@ -4,10 +4,10 @@ import "testing"
 
 func TestPricePausedContractsCountTowardPaidTarget(t *testing.T) {
 	tests := []struct {
-		name                               string
-		healthy, pricePaused, otherPaused  int
-		wanted                             uint64
-		expected                           int
+		name                              string
+		healthy, pricePaused, otherPaused int
+		wanted                            uint64
+		expected                          int
 	}{
 		{"price-only pauses never force replacements", 30, 58, 0, 88, 88},
 		{"mixed pause keeps full price budget", 30, 40, 30, 88, 87},
