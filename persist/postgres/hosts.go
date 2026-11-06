@@ -653,6 +653,17 @@ WHERE public_key = $10 AND settings_valid_until < $8`
 			prices.ValidUntil,
 			sqlSignature(prices.Signature),
 			sqlPublicKey(hk))
+		if err != nil {
+			return err
+		}
+		// A valid price table obtained without a full scan may immediately
+		// trigger quarantine, but it cannot clear a quarantine by itself.
+		_, err = tx.Exec(ctx, `
+UPDATE hosts
+SET price_quarantine_since = COALESCE(price_quarantine_since, NOW()),
+	price_recovery_scans = 0
+FROM global_settings AS globals
+WHERE hosts.public_key = $1 AND (`+sqlHostOverPrice+`)`, sqlPublicKey(hk))
 		return err
 	})
 }
