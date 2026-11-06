@@ -330,6 +330,19 @@ func TestSectorsToMigrate(t *testing.T) {
 	allContracts := []contracts.Contract{goodContract, badContract, sameLocationContract}
 	assertResult(allHosts, allContracts, []int{1, 2}, nil)
 
+	// A one-off ingress-price spike must not migrate a good, paid sector.
+	// The temporarily quarantined host is not an upload candidate.
+	priceGlitchHosts := slices.Clone(allHosts)
+	priceGlitchHosts[0].Usability.IngressPrice = false
+	assertResult(priceGlitchHosts, allContracts, []int{1, 2}, nil)
+
+	// In contrast, an explicitly and permanently blocked host must have
+	// its sector migrated, even though its contract is otherwise good.
+	permanentBanHosts := slices.Clone(allHosts)
+	permanentBanHosts[0].Blocked = true
+	permanentBanHosts[0].BlockedReasons = []string{"ManualBan"}
+	assertResult(permanentBanHosts, allContracts, []int{0, 1, 2}, nil)
+
 	// prepare a bunch of hosts and contracts which can't be used for repairs
 	badHost2 := newHost(false, false)
 	cBadHost2 := newContract(badHost2.PublicKey, true)
